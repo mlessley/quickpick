@@ -88,6 +88,8 @@ class TimerLauncher:
     panes = ("",)
     shows_tail = False
     accepts_prefixes = False
+    hint = "Enter starts the timer, or cancels the running one"
+    notice: str | None = None
 
     def __init__(self, timer: FocusTimer) -> None:
         self.timer = timer
@@ -111,11 +113,14 @@ class TimerLauncher:
         rest = query[2:].strip()
         if not rest and self.timer.running:
             self.timer.cancel()
+            self.notice = "Timer cancelled"
             return ""
         parsed = parse_timer(rest)
         if parsed is None:
             return query
         self.timer.start(*parsed)
+        minutes, label = parsed
+        self.notice = f"Timer set: {minutes} min, {label}"
         return None
 
     def edit(self) -> bool:

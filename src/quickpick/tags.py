@@ -1,5 +1,5 @@
-"""Tags such as #xyz-mtg, switched on in notes mode and applied to every new digest entry,
-and the labels (`bob: ...`) that notes are written with."""
+"""Tags such as #project-x, switched on in notes mode and applied to every new digest entry,
+and the labels (`idea: ...`) that notes are written with."""
 
 import re
 from difflib import get_close_matches
@@ -63,15 +63,16 @@ def recent_labels(digest_dir: Path) -> list[str]:
     seen: list[str] = []
     for day in reversed(list_days(digest_dir)[-RECENT_DAYS:]):
         for entry in reversed(read_day(digest_dir, day)):
-            if entry.label and entry.label not in seen:
-                seen.append(entry.label)
+            for label in entry.labels:
+                if label not in seen:
+                    seen.append(label)
     return seen
 
 
 def typed_label(query: str) -> str | None:
     """The label the note being typed will have (after any todo mark), once its colon and
     space are there."""
-    # Trimmed as the note will be when saved, except at the end, where "bob: " is complete
+    # Trimmed as the note will be when saved, except at the end, where "idea: " is complete
     text = query.lstrip()
     if text.startswith(TODO_MARK):
         text = text.removeprefix(TODO_MARK).lstrip()

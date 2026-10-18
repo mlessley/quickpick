@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-# "bob: said it's done" is labelled bob: a word starting with a letter, a colon, a space
+# "idea: weekly summary" is labelled idea: a word starting with a letter, a colon, a space
 LABEL = re.compile(r"([A-Za-z][\w-]*): ")
 # A note starting with this is a todo, e.g. "[] call Jane"
 TODO_MARK = "[]"
@@ -24,16 +24,38 @@ class DigestEntry:
 
     @property
     def label(self) -> str | None:
-        """Who or what the entry is about, from its opening `word: `, e.g. "bob"."""
+        """Who or what the entry is about, from its opening `word: `, e.g. "idea"."""
         if self.kind not in LABELLED_KINDS:
             return None
         match = LABEL.match(self.text)
         return match[1].lower() if match else None
 
     @property
+    def labels(self) -> tuple[str, ...]:
+        """Every label the entry carries: in a note, each line's opening `word: `
+        (e.g. one per speaker in meeting notes); in a todo or done entry, the first line's."""
+        if self.kind not in LABELLED_KINDS:
+            return ()
+        lines = self.text.split("\n") if self.kind == "note" else self.text.split("\n")[:1]
+        found: list[str] = []
+        for line in lines:
+            match = LABEL.match(line)
+            if match and match[1].lower() not in found:
+                found.append(match[1].lower())
+        return tuple(found)
+
+    @property
     def display_text(self) -> str:
         tags = "".join(f"#{tag} " for tag in self.tags)
-        return f"{self.time:%H:%M}  {tags}{KIND_MARKS.get(self.kind, '')}{self.text}"
+        return f"{self.time:%H:%M}  {tags}{KIND_MARKS.get(self.kind, '')}{one_line(self.text)}"
+
+
+def one_line(text: str) -> str:
+    """A note's first line, for one-line lists, with how many more there are."""
+    first, *more = text.split("\n")
+    if not more:
+        return first
+    return f"{first}  (+{len(more)} line{'s' if len(more) > 1 else ''})"
 
 
 def entry_id(day: date, index: int) -> str:

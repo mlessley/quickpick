@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from quickpick.browser import Browser, choose_browser, open_in_new_window
 from quickpick.modes import Mode, Selection
-from quickpick.quick_copy import QuickCopyEntry, filter_entries, parse_store
+from quickpick.store import StoreEntry, filter_entries, parse_store
 
 
 class Launcher(Mode, Protocol):
@@ -66,14 +66,16 @@ class StoreLauncher:
     panes = ("",)
     shows_tail = False
     accepts_prefixes = False
+    hint = "Enter open · Ctrl+Enter other browser · F2 edit"
+    notice: str | None = None
 
     def __init__(self, prefix: str, description: str, store_path: Path, browser: Browser = "edge"):
         self.prefix = prefix
         self.name = f"{prefix}: {description}"
         self.store_path = store_path
         self.browser = browser
-        self.entries: list[QuickCopyEntry] = []
-        self.matches: list[QuickCopyEntry] = []
+        self.entries: list[StoreEntry] = []
+        self.matches: list[StoreEntry] = []
 
     def reload(self) -> None:
         try:
@@ -87,8 +89,10 @@ class StoreLauncher:
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
         if selection is not None:
-            url = self.matches[selection[1]].value
-            open_in_new_window(url, choose_browser(self.browser, alternate))
+            entry = self.matches[selection[1]]
+            browser = choose_browser(self.browser, alternate)
+            open_in_new_window(entry.value, browser)
+            self.notice = f"Opened {entry.key} in {browser.title()}"
 
     def edit(self) -> bool:
         subprocess.Popen(["notepad.exe", str(self.store_path)])
@@ -102,6 +106,8 @@ class PrefixMenu:
     panes = ("",)
     shows_tail = False
     accepts_prefixes = False
+    hint = "Enter picks the prefix"
+    notice: str | None = None
 
     def __init__(self, launchers: Sequence[Launcher]) -> None:
         self.launchers = launchers
@@ -156,6 +162,8 @@ class JiraLauncher:
     panes = ("",)
     shows_tail = False
     accepts_prefixes = False
+    hint = "Enter open · Ctrl+Enter other browser"
+    notice: str | None = None
 
     def __init__(
         self, prefix: str, base_url: str, default_project: str, browser: Browser = "edge"
@@ -176,7 +184,9 @@ class JiraLauncher:
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
         if selection is not None:
-            open_in_new_window(self.url, choose_browser(self.browser, alternate))
+            browser = choose_browser(self.browser, alternate)
+            open_in_new_window(self.url, browser)
+            self.notice = f"Opened Jira in {browser.title()}"
 
     def edit(self) -> bool:
         return False

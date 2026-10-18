@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 import pytest
 
-from quickpick.digest import DigestEntry, append_entry, list_days, read_day
+from quickpick.digest import DigestEntry, append_entry, list_days, one_line, read_day
 
 
 def test_entries_read_back_in_the_order_they_were_appended(tmp_path):
@@ -71,6 +71,17 @@ def test_display_text_marks_each_kind_and_shows_tags_first():
     assert shown("timer") == "09:05  ⏱ x"
 
 
+def test_a_note_of_several_lines_shows_its_first_line_and_how_many_more():
+    entry = DigestEntry(
+        time=datetime(2026, 10, 18, 9, 5), kind="note", text="idea: summary page\n- by week\n- tags"
+    )
+
+    assert entry.display_text == "09:05  idea: summary page  (+2 lines)"
+    assert entry.label == "idea"
+    assert one_line("one\ntwo") == "one  (+1 line)"
+    assert one_line("one") == "one"
+
+
 @pytest.mark.parametrize(
     ("text", "label"),
     [
@@ -97,3 +108,16 @@ def test_todos_and_their_done_entries_have_labels_but_screenshots_do_not():
 
     assert (entry("todo").label, entry("done").label) == ("bob", "bob")
     assert entry("screenshot").label is None
+
+
+def test_every_line_of_a_note_can_carry_a_label_but_a_todos_only_its_first():
+    def entry(kind: str) -> DigestEntry:
+        return DigestEntry(
+            time=datetime(2026, 10, 18, 9, 0),
+            kind=kind,
+            text="Standup\nana: sends the deck\nben: owns QA\nANA: and the notes",
+        )
+
+    assert entry("note").labels == ("ana", "ben")
+    assert entry("note").label is None
+    assert entry("todo").labels == ()

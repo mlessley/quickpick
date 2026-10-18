@@ -1,7 +1,7 @@
 [project]
 name = "quickpick"
 version = "0.1.0"
-description = "A keyboard-driven Windows popup: quick-copy strings, Edge and repo launchers, and a plain-text notes, todo and screenshot log with a local web viewer."
+description = "A keyboard-driven Windows popup: a stash of strings to copy, bookmark and repo launchers, and a plain-text log of notes, todos and screenshots with a local web viewer."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"

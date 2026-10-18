@@ -8,23 +8,27 @@ from typing import Protocol
 
 import pyperclip
 
+from quickpick.added import AddedEntry, AddedList, parse_addition
 from quickpick.browser import Browser, choose_browser, open_in_new_window
 from quickpick.digest import (
     TODO_MARK,
     DigestEntry,
     append_entry,
     list_days,
+    one_line,
     open_todos,
     read_day,
 )
 from quickpick.edge import Link, filter_links, parse_bookmarks, read_history
-from quickpick.quick_copy import QuickCopyEntry, filter_entries, parse_store
+from quickpick.store import StoreEntry, filter_entries, parse_store
 from quickpick.tags import ActiveTags, parse_tag_query, recent_labels, recent_tags
 
 HISTORY_LOAD_LIMIT = 5000
 HISTORY_SHOW_LIMIT = 100
 
 NOTES_EMPTY_HINT = "No notes yet today. Type and press Enter to add one."
+SAVED_EMPTY_HINT = "Nothing saved yet. F2 edits them in Notepad, one key~!~value per line."
+ADDED_EMPTY_HINT = "Type or paste text and press Ctrl+Enter to stash it here."
 
 # (pane, index) of the selected match
 Selection = tuple[int, int]
@@ -47,6 +51,10 @@ class Mode(Protocol):
     # panes above it are short lists sized to their rows, and hidden while empty
     shows_tail: bool
     accepts_prefixes: bool  # whether special-launcher prefixes apply (not for free-text input)
+    hint: str  # the keys that work here, for the status bar
+    # What the last activate did, for the status bar (e.g. `Copied "vpn"`); None if nothing
+    # worth saying. The popup reads it once and clears it
+    notice: str | None
 
     def reload(self) -> None:
         """Re-read the mode's data sources; called whenever the mode is shown."""
@@ -62,41 +70,102 @@ class Mode(Protocol):
         """Open the mode's data source for editing; False if the mode has none."""
 
 
-class QuickCopyMode:
-    name = "Quick copy"
-    panes = ("",)
+class StashMode:
+    """Strings to copy: the saved list, edited by hand, and below it the added list,
+    filled from the popup with Ctrl+Enter."""
+
+    name = "Stash"
+    panes = ("Saved", "Added")
     shows_tail = False
     accepts_prefixes = True
+    hint = "Enter copy · Ctrl+Enter stash · F2 edit · Ctrl+Del remove"
+    notice: str | None = None
 
-    def __init__(self, store_path: Path) -> None:
+    def __init__(self, store_path: Path, added: AddedList) -> None:
         self.store_path = store_path
-        self.entries: list[QuickCopyEntry] = []
-        self.matches: list[QuickCopyEntry] = []
+        self.added = added
+        self.entries: list[StoreEntry] = []
+        self.matches: list[StoreEntry] = []
+        self.added_matches: list[AddedEntry] = []
+        # A query whose label is already in use, stashed anyway on a second Ctrl+Enter
+        self.confirming: str | None = None
 
     def reload(self) -> None:
         try:
             self.entries = parse_store(self.store_path.read_text())
         except FileNotFoundError:
             self.entries = []
+        self.added.reload()
 
-    def search(self, query: str) -> list[list[str]]:
+    def search(self, query: str) -> list[list[Row]]:
         self.matches = filter_entries(self.entries, query)
-        return [[entry.display_text for entry in self.matches]]
+        self.added_matches = AddedList.filter(self.added.entries, query)
+        saved: list[Row] = [entry.display_text for entry in self.matches]
+        added: list[Row] = [entry.display_text for entry in self.added_matches]
+        return [
+            saved or ([Muted(SAVED_EMPTY_HINT)] if not self.entries else []),
+            added or ([Muted(ADDED_EMPTY_HINT)] if not self.added.entries else []),
+        ]
 
-    def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
-        if selection is not None:
-            pyperclip.copy(self.matches[selection[1]].value)
+    def activate(self, query: str, selection: Selection | None, alternate: bool) -> str | None:
+        self.notice = None
+        if alternate:
+            return self._add(query)
+        entry = self._selected(selection)
+        if entry is None:
+            return query
+        pyperclip.copy(entry.value)
+        name = entry.key if isinstance(entry, StoreEntry) else entry.label
+        self.notice = f'Copied "{name}"' if name else "Copied"
+        return None
 
-    def edit(self) -> bool:
-        subprocess.Popen(["notepad.exe", str(self.store_path)])
+    def _selected(self, selection: Selection | None) -> StoreEntry | AddedEntry | None:
+        if selection is None:
+            return None
+        pane, index = selection
+        matches = self.matches if pane == 0 else self.added_matches
+        return matches[index] if index < len(matches) else None
+
+    def _add(self, query: str) -> str:
+        addition = parse_addition(query)
+        if addition is None:
+            self.notice = "Type or paste something to stash first"
+            return query
+        label, value, masked = addition
+        in_use = {entry.key for entry in self.entries} | {
+            entry.label for entry in self.added.entries if entry.label
+        }
+        if label in in_use and self.confirming != query:
+            self.confirming = query
+            self.notice = f'"{label}" exists: Ctrl+Enter again adds it'
+            return query
+        self.confirming = None
+        self.added.add(AddedEntry(datetime.now(), label, value, masked))
+        self.notice = f'Stashed "{label}"' if label else "Stashed, at the top of Added"
+        return ""
+
+    def remove(self, selection: Selection | None) -> bool:
+        """Ctrl+Delete: drop the selected added entry; saved entries are edited with F2."""
+        entry = self._selected(selection)
+        if not isinstance(entry, AddedEntry):
+            return False
+        self.added.remove(entry)
+        return True
+
+    def edit(self, selection: Selection | None = None) -> bool:
+        """F2: open the file of the list the selection is in."""
+        on_added = selection is not None and selection[0] == 1
+        subprocess.Popen(["notepad.exe", str(self.added.path if on_added else self.store_path)])
         return True
 
 
-class EdgeLauncherMode:
-    name = "Edge"
+class BookmarksMode:
+    name = "Bookmarks"
     panes = ("Bookmarks", "History")
     shows_tail = False
     accepts_prefixes = True
+    hint = "Enter open · Ctrl+Enter other browser · Tab other list"
+    notice: str | None = None
 
     def __init__(self, profile_dir: Path, browser: Browser = "edge") -> None:
         self.profile_dir = profile_dir
@@ -126,8 +195,10 @@ class EdgeLauncherMode:
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
         if selection is not None:
             pane, index = selection
-            url = self.matches[pane][index].url
-            open_in_new_window(url, choose_browser(self.browser, alternate))
+            link = self.matches[pane][index]
+            browser = choose_browser(self.browser, alternate)
+            open_in_new_window(link.url, browser)
+            self.notice = f"Opened {link.name} in {browser.title()}"
 
     def edit(self) -> bool:
         return False
@@ -138,6 +209,8 @@ class NotesMode:
     panes = ("Open todos", "Notes")
     shows_tail = True
     accepts_prefixes = False
+    hint = "Enter save · Shift+Enter more lines · [] todo · #tag · F2 viewer"
+    notice: str | None = None
 
     def __init__(
         self,
@@ -183,7 +256,7 @@ class NotesMode:
         tags = "".join(f"#{tag} " for tag in todo.tags)
         day = todo.time.date()
         since = f"   · {day:%a %m-%d}" if day != self.today() else ""
-        return f"☐ {tags}{todo.text}{since}"
+        return f"☐ {tags}{one_line(todo.text)}{since}"
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> str:
         text = query.strip()
@@ -196,18 +269,21 @@ class NotesMode:
             )
             append_entry(self.digest_dir, entry)
             self.reload()
+            self.notice = "Todo added" if kind == "todo" else "Note saved"
         return ""
 
-    def complete(self, selection: Selection | None) -> None:
-        """Ctrl+D: tick off the selected open todo with a done entry pointing at it."""
+    def complete(self, selection: Selection | None) -> bool:
+        """Ctrl+D: tick off the selected open todo with a done entry pointing at it; False
+        if no todo is selected."""
         if selection is None or selection[0] != 0 or selection[1] >= len(self.todos):
-            return
+            return False
         todo_id, todo = self.todos[selection[1]]
         done = DigestEntry(
             time=datetime.now(), kind="done", text=todo.text, tags=todo.tags, ref=todo_id
         )
         append_entry(self.digest_dir, done)
         self.reload()
+        return True
 
     def edit(self) -> bool:
         # The full digest, with its screenshots, lives in the viewer
@@ -225,6 +301,8 @@ class TagMenu:
     panes = ("",)
     shows_tail = False
     accepts_prefixes = False
+    hint = "Enter turns the tag on or off"
+    notice: str | None = None
 
     def __init__(self, tags: ActiveTags, digest_dir: Path) -> None:
         self.tags = tags
@@ -253,6 +331,7 @@ class TagMenu:
         tag = self.matches[selection[1]] if selection else parse_tag_query(query)
         if tag:
             self.tags.toggle(tag)
+            self.notice = f"#{tag} {'on' if tag in self.tags.active else 'off'}"
         return ""
 
     def edit(self) -> bool:

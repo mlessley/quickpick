@@ -9,6 +9,7 @@ from tkinter import ttk
 
 from pydantic import ValidationError
 
+from quickpick.added import AddedList
 from quickpick.app_switch import app_key_sequences, bring_to_front, list_windows, pick_window
 from quickpick.config import CONFIG_PATH, DATA_DIR, AppShortcut, load_config
 from quickpick.digest import DigestEntry, append_entry, open_todos, read_day
@@ -23,12 +24,12 @@ from quickpick.launchers import (
     strip_colon_form,
 )
 from quickpick.modes import (
-    EdgeLauncherMode,
+    BookmarksMode,
     Mode,
     Muted,
     NotesMode,
-    QuickCopyMode,
     Selection,
+    StashMode,
     TagMenu,
 )
 from quickpick.screenshot import (
@@ -78,6 +79,17 @@ WIDTH, HEIGHT = 600, 460
 # Most rows a pane above a log (notes' open todos) shows before it scrolls
 FITTED_PANE_ROWS = 5
 TIMER_TICK_MS = 1000
+# The coloured edge showing the popup has focus (accent) or is pinned (amber)
+BORDER = 2
+# Focus events arrive in pairs as focus moves between the popup's own widgets; act once
+# they've settled
+FOCUS_SETTLE_MS = 50
+# Pointer travel, in pixels, that turns a press on a mode name into a drag
+DRAG_THRESHOLD = 4
+# Rows of the multiline draft
+DRAFT_LINES = 6
+# How long the status bar shows what just happened before going back to the keys
+SAY_MS = 4000
 # Keys that don't dismiss the splash on their own (Ctrl+H toggles it; Esc hides the popup)
 SPLASH_KEEP_KEYS = {
     "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R",
@@ -124,25 +136,43 @@ class Popup:
         self.pinned = False
         # After one Ctrl+Q: a second one quits, any other key stays
         self.quit_armed = False
+        # Whether the query is open as the multiline draft (Shift+Enter)
+        self.draft_open = False
+
+        # Where a press on a mode name started, to tell a click (switch mode) from a drag
+        self.press_at = (0, 0)
+        self.dragged = False
 
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
         self.root.geometry(f"{WIDTH}x{HEIGHT}+200+200")
         self.root.option_add("*Font", FONT)
         self._apply_colors()
+        # The root's own background, showing through this padding, is the focus border
+        self.root.configure(padx=BORDER, pady=BORDER)
         self.root.bind("<Escape>", self._on_escape)
+        self.root.bind("<FocusIn>", lambda _event: self.root.after(FOCUS_SETTLE_MS, self._on_focus))
+        self.root.bind(
+            "<FocusOut>", lambda _event: self.root.after(FOCUS_SETTLE_MS, self._on_focus)
+        )
         self._style_scrollbars()
 
-        # The window has no title bar, so the mode bar is where it's dragged from
+        # The window has no title bar, so the mode bar is where it's dragged from; a click
+        # on a mode's name switches to it
         self.mode_bar = tk.Frame(self.root, padx=6, pady=3, cursor="fleur")
         self.mode_bar.pack(fill="x")
-        self.mode_names = [tk.Label(self.mode_bar, text=mode.name) for mode in modes]
-        for label in self.mode_names:
+        self.mode_names = [
+            tk.Label(self.mode_bar, text=mode.name, cursor="hand2") for mode in modes
+        ]
+        for index, label in enumerate(self.mode_names):
             label.pack(side="left", padx=(0, 12))
+            label.bind("<ButtonPress-1>", self._press_mode_name)
+            label.bind("<B1-Motion>", self._drag)
+            label.bind("<ButtonRelease-1>", lambda _event, index=index: self._click_mode(index))
+        # Where the query is going when it isn't the mode, e.g. "· → g: Repo shortcuts"
         self.mode_hint = tk.Label(self.mode_bar)
-        self.mode_hint.pack(side="left", padx=(12, 0))
+        self.mode_hint.pack(side="left")
         self.pin_button = tk.Label(self.mode_bar, text="📌", cursor="hand2", fg=self.colors.muted)
         self.pin_button.pack(side="right")
         self.pin_button.bind("<ButtonRelease-1>", self._toggle_pin)
@@ -151,7 +181,7 @@ class Popup:
         # A chip per active tag, left of the timer
         self.status_bar = tk.Frame(self.mode_bar)
         self.status_bar.pack(side="right", padx=(0, 8))
-        for widget in (self.mode_bar, *self.mode_names, self.mode_hint):
+        for widget in (self.mode_bar, self.mode_hint):
             widget.bind("<ButtonPress-1>", self._start_drag)
             widget.bind("<B1-Motion>", self._drag)
             widget.bind("<ButtonRelease-1>", lambda _event: self.entry.focus_set())
@@ -165,6 +195,24 @@ class Popup:
         self.entry = tk.Entry(entry_row, textvariable=self.query_var, font=QUERY_FONT)
         self.entry.pack(side="left", fill="x", expand=True)
         self.label_badge = tk.Label(entry_row, background=self.colors.field)
+        # The same query opened up to several lines (Shift+Enter, in notes and the stash)
+        self.draft = tk.Text(
+            entry_row,
+            height=DRAFT_LINES,
+            font=QUERY_FONT,
+            wrap="word",
+            undo=True,
+            relief="flat",
+            highlightthickness=1,
+            background=self.colors.field,
+        )
+        self.draft.bind("<KeyRelease>", self._on_draft_changed)
+        self.draft.bind("<<Paste>>", lambda _event: self.root.after_idle(self._on_draft_changed))
+        self.draft.bind("<Control-Return>", self._save_draft)
+        self.draft.bind("<Escape>", self._close_draft)
+        self.draft.bind("<Control-p>", self._toggle_pin)
+        self.draft.bind("<Control-P>", self._toggle_pin)  # with Caps Lock on
+        self.entry.bind("<Shift-Return>", self._open_draft)
         self.entry.bind("<Up>", self._on_arrow_up)
         self.entry.bind("<Down>", self._on_arrow_down)
         self.entry.bind("<Return>", self._on_activate)
@@ -176,6 +224,10 @@ class Popup:
         self.entry.bind("<Control-Shift-Tab>", lambda _event: self._switch_mode(-1))
         self.entry.bind("<Control-n>", self._on_notes_key)
         self.entry.bind("<Control-N>", self._on_notes_key)  # with Caps Lock on
+        for key, mode_type in (("s", StashMode), ("b", BookmarksMode)):
+            for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
+                self.entry.bind(sequence, lambda _event, kind=mode_type: self._go_to(kind))
+        self.entry.bind("<Control-Delete>", self._on_remove)
         for app in apps or []:
             for sequence in app_key_sequences(app.key):
                 self.entry.bind(sequence, lambda _event, app=app: self._switch_to_app(app))
@@ -193,6 +245,12 @@ class Popup:
         # then does its usual job
         self.entry.bindtags(("SplashDismiss", *self.entry.bindtags()))
         self.root.bind_class("SplashDismiss", "<KeyPress>", self._before_key)
+
+        # Along the bottom: the keys that work here, or for a moment what just happened
+        self.footer = tk.Label(self.root, anchor="w", padx=6, pady=2)
+        self.footer.pack(side="bottom", fill="x")
+        self.saying: str | None = None
+        self.say_timer: str | None = None
 
         self.panes_frame = tk.Frame(self.root)
         self.panes_frame.pack(fill="both", expand=True)
@@ -276,7 +334,7 @@ class Popup:
             self.root.quit()
         else:
             self.quit_armed = True
-            self.mode_hint.config(text="Quit Quickpick? Ctrl+Q again to quit", fg=self.colors.text)
+            self._say("Quit Quickpick? Ctrl+Q again to quit")
         return "break"
 
     def show(self, reset: bool = True) -> None:
@@ -302,10 +360,31 @@ class Popup:
         self.entry.focus_set()
 
     def _toggle_pin(self, _event: object = None) -> str:
+        """Pinned: stays open and on top of other windows. Unpinned, it closes when it
+        loses focus, so it's never left open behind them."""
         self.pinned = not self.pinned
+        self.root.attributes("-topmost", self.pinned)
         self.pin_button.config(fg=self.colors.accent if self.pinned else self.colors.muted)
-        self.entry.focus_set()
+        (self.draft if self.draft_open else self.entry).focus_set()
+        self._update_border()
+        self._say("Pinned: stays open and on top" if self.pinned else "Unpinned")
         return "break"
+
+    def _has_focus(self) -> bool:
+        return self.visible and is_own_window(foreground_window())
+
+    def _on_focus(self) -> None:
+        if self.visible and not self.pinned and not self._has_focus():
+            self.hide()
+        self._update_border()
+
+    def _update_border(self) -> None:
+        colors = self.colors
+        if not self._has_focus():
+            color = colors.border
+        else:
+            color = colors.warning if self.pinned else colors.accent
+        self.root.configure(background=color)
 
     def _after_action(self) -> None:
         """An action is done (copied, opened, switched): close, unless pinned."""
@@ -317,7 +396,8 @@ class Popup:
     def hide(self, for_capture: bool = False) -> None:
         """for_capture: only stepping aside for a screenshot, which isn't closing, so the
         tags stay on."""
-        had_focus = self.visible and is_own_window(foreground_window())
+        had_focus = self._has_focus()
+        self._close_draft()
         self.root.withdraw()
         # The splash is for startup and Ctrl+H; the next summon opens on the lists
         self.hide_splash()
@@ -339,6 +419,8 @@ class Popup:
 
     def _switch_mode(self, delta: int) -> str:
         self.mode_index = (self.mode_index + delta) % len(self.modes)
+        if not isinstance(self.mode, (NotesMode, StashMode)):
+            self._close_draft()
         self.mode.reload()
         self._refresh_matches()
         return "break"
@@ -398,10 +480,78 @@ class Popup:
 
     def _start_drag(self, event: tk.Event) -> None:
         self.drag_offset = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+        self.press_at = (event.x_root, event.y_root)
+        self.dragged = False
+
+    def _press_mode_name(self, event: tk.Event) -> str:
+        self._start_drag(event)
+        # Not on to the mode bar's own binding, which would start the drag again
+        return "break"
 
     def _drag(self, event: tk.Event) -> None:
+        if not self.dragged:
+            press_x, press_y = self.press_at
+            moved = max(abs(event.x_root - press_x), abs(event.y_root - press_y))
+            if moved < DRAG_THRESHOLD:
+                return
+            self.dragged = True
         x, y = self.drag_offset
         self.root.geometry(f"+{event.x_root - x}+{event.y_root - y}")
+
+    def _click_mode(self, index: int) -> str:
+        if not self.dragged:
+            self._switch_mode(index - self.mode_index)
+        self.entry.focus_set()
+        return "break"
+
+    def _go_to(self, mode_type: type) -> str:
+        """Ctrl+S / Ctrl+B (and Ctrl+N's first press): to the mode of that type."""
+        for index, mode in enumerate(self.modes):
+            if isinstance(mode, mode_type):
+                self._switch_mode(index - self.mode_index)
+        return "break"
+
+    def _open_draft(self, _event: object) -> str:
+        """Shift+Enter: open the query up to several lines, starting a new one at the cursor."""
+        if self.draft_open or not isinstance(self.view, (NotesMode, StashMode)):
+            return "break"
+        query = self.query_var.get()
+        cursor = self.entry.index(tk.INSERT)
+        self.draft.delete("1.0", tk.END)
+        self.draft.insert("1.0", f"{query[:cursor]}\n{query[cursor:]}")
+        self.draft.mark_set(tk.INSERT, f"1.0 + {cursor + 1} chars")
+        self.draft.edit_reset()
+        self.entry.pack_forget()
+        self.draft.pack(side="left", fill="x", expand=True)
+        self.draft_open = True
+        self.draft.focus_set()
+        self._on_draft_changed()
+        self._update_footer()
+        return "break"
+
+    def _on_draft_changed(self, _event: object = None) -> None:
+        text = self.draft.get("1.0", "end-1c")
+        if text != self.query_var.get():
+            self.query_var.set(text)
+        else:
+            # Only the cursor moved: the badge follows its line
+            self._update_label_badge(text)
+
+    def _save_draft(self, event: object) -> str:
+        """Ctrl+Enter in the draft: as Ctrl+Enter in the query box (save a note, stash)."""
+        self._on_draft_changed()
+        return self._on_activate(event, alternate=True)
+
+    def _close_draft(self, _event: object = None) -> str:
+        """Back to the one-line query box, keeping what was typed, line breaks and all."""
+        if self.draft_open:
+            self.draft.pack_forget()
+            self.entry.pack(side="left", fill="x", expand=True)
+            self.draft_open = False
+            self.entry.focus_set()
+            self.entry.icursor(tk.END)
+            self._update_footer()
+        return "break"
 
     def _update_mode_label(self) -> None:
         colors = self.colors
@@ -410,11 +560,33 @@ class Popup:
             label.config(
                 font=BOLD_FONT if current else FONT, fg=colors.text if current else colors.muted
             )
-        if self.view is not self.mode:
-            self.mode_hint.config(text=f"→ {self.view.name}", fg=colors.text)
-        else:
-            # Short, to leave room for tags and the timer; the splash lists every key
-            self.mode_hint.config(text="Ctrl+H help", fg=colors.muted)
+        going_to = f"·   → {self.view.name}" if self.view is not self.mode else ""
+        self.mode_hint.config(text=going_to, fg=colors.text)
+        self._update_footer()
+
+    def _update_footer(self) -> None:
+        if self.saying is not None:
+            self.footer.config(text=self.saying, fg=self.colors.text)
+            return
+        keys = self.view.hint
+        if self.draft_open:
+            keys = "Ctrl+Enter save · Enter new line · Esc one line"
+        elif isinstance(self.view, NotesMode) and self._selection() is not None:
+            keys = "Ctrl+D tick off the todo · " + keys
+        self.footer.config(text=f"{keys} · Ctrl+H help", fg=self.colors.muted)
+
+    def _say(self, message: str) -> None:
+        """Show what just happened in the status bar for a moment, then the keys again."""
+        self.saying = message
+        if self.say_timer is not None:
+            self.root.after_cancel(self.say_timer)
+        self.say_timer = self.root.after(SAY_MS, self._stop_saying)
+        self._update_footer()
+
+    def _stop_saying(self) -> None:
+        self.saying = None
+        self.say_timer = None
+        self._update_footer()
 
     def _tick(self) -> None:
         """Every second: count the timer down in the mode bar, and announce its end."""
@@ -428,6 +600,9 @@ class Popup:
     def _update_label_badge(self, query: str) -> None:
         """While a note's label is typed: green if it's been used before, amber if it's
         new, with the known label it's probably a typo of."""
+        if self.draft_open:
+            # Any line of a note can carry a label: the one the cursor is on
+            query = self.draft.get("insert linestart", "insert lineend")
         label = typed_label(query) if isinstance(self.view, NotesMode) else None
         if label is None:
             self.label_badge.pack_forget()
@@ -440,7 +615,9 @@ class Popup:
             if suggestion:
                 text += f" · {suggestion}?"
         self.label_badge.config(text=text, fg=color)
-        self.label_badge.pack(side="right", padx=(8, 6))
+        # Ahead of the query box, which would otherwise take all the room
+        query_box = self.draft if self.draft_open else self.entry
+        self.label_badge.pack(side="right", padx=(8, 6), before=query_box)
 
     def _update_status(self) -> None:
         """Redraw the right of the mode bar: a chip per active tag (click to switch off)."""
@@ -462,7 +639,7 @@ class Popup:
         window = pick_window(list_windows(), app.program, app.title)
         if window is None:
             # Until the next query change or mode switch redraws the bar
-            self.mode_hint.config(text=f"{app.name} has no open window", fg=self.colors.text)
+            self._say(f"{app.name} has no open window")
             return "break"
         # While the popup still has the foreground, which Windows requires to hand it on
         bring_to_front(window)
@@ -473,10 +650,7 @@ class Popup:
         """Ctrl+N: to notes mode from any other mode; in notes mode, on to the viewer."""
         if isinstance(self.mode, NotesMode):
             return self._on_edit(_event)
-        notes = next((i for i, mode in enumerate(self.modes) if isinstance(mode, NotesMode)), None)
-        if notes is not None:
-            self._switch_mode(notes - self.mode_index)
-        return "break"
+        return self._go_to(NotesMode)
 
     def _build_panes(self) -> None:
         if self.panes_built_for is self.view:
@@ -520,7 +694,8 @@ class Popup:
         self._update_label_badge(query)
         self._build_panes()
         results = self.view.search(self._view_query(query))
-        self.match_counts = [len(texts) for texts in results]
+        # Greyed rows (hints, earlier days) are context, not matches to pick from
+        self.match_counts = [sum(not isinstance(row, Muted) for row in rows) for rows in results]
         for listbox, rows in zip(self.listboxes, results, strict=True):
             listbox.delete(0, tk.END)
             for row in rows:
@@ -568,8 +743,12 @@ class Popup:
         listbox.selection_set(index)
         listbox.activate(index)
         listbox.see(index)
+        self._update_footer()
 
     def _selection(self) -> Selection | None:
+        if self.active_pane >= len(self.listboxes):
+            # Not built yet, or rebuilt for a view with fewer panes
+            return None
         selected = self.listboxes[self.active_pane].curselection()
         return (self.active_pane, selected[0]) if selected else None
 
@@ -606,7 +785,8 @@ class Popup:
     def _on_complete(self, _event: object) -> str:
         """Ctrl+D in notes: tick off the selected todo."""
         if isinstance(self.view, NotesMode):
-            self.view.complete(self._selection())
+            if self.view.complete(self._selection()):
+                self._say("Todo ticked off")
             self._refresh_matches()
         return "break"
 
@@ -632,15 +812,23 @@ class Popup:
 
     def _on_activate(self, _event: object, alternate: bool = False) -> str:
         query = self._view_query(self.query_var.get())
-        next_query = self.view.activate(query, self._selection(), alternate)
+        view = self.view
+        next_query = view.activate(query, self._selection(), alternate)
+        if view.notice:
+            # Said even if the popup then closes, so it's there if it's pinned
+            self._say(view.notice)
+            view.notice = None
         if next_query == query:
             # Handed back unchanged: keep it as typed, leading colon and all
             next_query = self.query_var.get()
         if next_query is None:
             self._after_action()
-        else:
-            self.query_var.set(next_query)
-            self.entry.icursor(tk.END)
+            return "break"
+        if next_query != self.query_var.get():
+            # Done with what was typed, e.g. a note saved: back to one line for the next
+            self._close_draft()
+        self.query_var.set(next_query)
+        self.entry.icursor(tk.END)
         return "break"
 
     def _on_escape(self, _event: object) -> str:
@@ -648,8 +836,19 @@ class Popup:
         return "break"
 
     def _on_edit(self, _event: object) -> str:
-        if self.view.edit():
+        if isinstance(self.view, StashMode):
+            edited = self.view.edit(self._selection())
+        else:
+            edited = self.view.edit()
+        if edited:
             self._after_action()
+        return "break"
+
+    def _on_remove(self, _event: object) -> str:
+        """Ctrl+Delete in the stash: drop the selected added entry."""
+        if isinstance(self.view, StashMode) and self.view.remove(self._selection()):
+            self._say("Removed from the stash")
+            self._refresh_matches()
         return "break"
 
 
@@ -778,9 +977,11 @@ def main() -> None:
     )
     popup = Popup(
         [
-            QuickCopyMode(store_path),
-            EdgeLauncherMode(profile_dir(config.edge_profile), config.browser),
             NotesMode(DATA_DIR / "digest", open_viewer=viewer.open, tags=tags),
+            StashMode(
+                store_path, AddedList(DATA_DIR / "stash-added.jsonl", config.stash_added_limit)
+            ),
+            BookmarksMode(profile_dir(config.edge_profile), config.browser),
         ],
         launchers,
         config.apps,

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class QuickCopyEntry:
+class StoreEntry:
     key: str
     value: str
     masked: bool
@@ -14,19 +14,22 @@ class QuickCopyEntry:
         return f"{self.key}: {self.value}"
 
 
-def parse_store(text: str) -> list[QuickCopyEntry]:
+SEPARATOR = "~!~"
+
+
+def parse_store(text: str) -> list[StoreEntry]:
     entries = []
     for line in text.splitlines():
         if not line:
             continue
-        key, _, value = line.partition("~!~")
+        key, _, value = line.partition(SEPARATOR)
         masked = key.startswith("*")
         if masked:
             key = key[1:]
-        entries.append(QuickCopyEntry(key=key, value=value, masked=masked))
+        entries.append(StoreEntry(key=key, value=value, masked=masked))
     return entries
 
 
-def filter_entries(entries: list[QuickCopyEntry], query: str) -> list[QuickCopyEntry]:
+def filter_entries(entries: list[StoreEntry], query: str) -> list[StoreEntry]:
     needle = query.lower()
     return [entry for entry in entries if needle in entry.display_text.lower()]

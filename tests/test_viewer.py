@@ -268,3 +268,18 @@ def test_opening_reuses_an_open_viewer_instead_of_a_new_window(tmp_path):
         assert viewer.server is not None
     finally:
         viewer.close()
+
+
+def test_each_labelled_line_of_a_note_links_its_label_and_any_finds_the_note():
+    note = DigestEntry(
+        time=datetime(2026, 10, 18, 9, 0), kind="note", text="Standup\nana: sends the deck"
+    )
+
+    log = render_page([(TODAY, [note])], "tok", span=30, today=TODAY, first_day=TODAY)
+    anas = render_page(
+        [(TODAY, [note])], "tok", span=None, today=TODAY, first_day=TODAY, label="ana"
+    )
+
+    link = '<a class="label" href="/?days=all&amp;label=ana">ana:</a>'
+    assert f"Standup\n{link} sends the deck" in log
+    assert "Standup" in anas

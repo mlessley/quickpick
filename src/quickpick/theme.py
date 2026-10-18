@@ -16,7 +16,7 @@ class Palette:
     selection: str
     selection_text: str
     accent: str  # the splash title underline and its keys
-    label: str  # a label already in use (`bob: `), as in the viewer
+    label: str  # a label already in use (`idea: `), as in the viewer
     warning: str  # a label not used before, which may be a typo
     thumb: str  # scrollbar thumb
     thumb_active: str

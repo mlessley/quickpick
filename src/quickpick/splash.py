@@ -54,8 +54,10 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
             [
                 ("Ctrl+Tab", "Next mode"),
                 ("Ctrl+N", "Notes, then the viewer"),
+                ("Ctrl+S / B", "Stash / Bookmarks"),
                 ("F2", "Edit store / viewer"),
-                ("Ctrl+Enter", "Other browser"),
+                ("Ctrl+Enter", "Other browser / stash it"),
+                ("Shift+Enter", "Write several lines"),
                 ("Ctrl+P", "Pin open"),
                 ("Ctrl+H", "This help"),
                 ("Ctrl+Q", "Quit Quickpick"),
@@ -97,7 +99,7 @@ def today_line(entries: list[DigestEntry]) -> str:
         parts.append(_count(screenshots, "screenshot"))
     if notes:
         last = notes[-1]
-        text = last.text
+        text = last.text.split("\n")[0]
         if len(text) > LAST_NOTE_CHARS:
             text = text[: LAST_NOTE_CHARS - 1] + "…"
         parts.append(f'last note {last.time:%H:%M} "{text}"')

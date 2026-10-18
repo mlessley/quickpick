@@ -103,3 +103,12 @@ def test_a_new_label_close_to_a_known_one_suggests_it():
     assert label_status("bob", known) == (True, None)
     assert label_status("bobb", known) == (False, "bob")
     assert label_status("url", known) == (False, None)
+
+
+def test_recent_labels_include_those_on_later_lines(tmp_path):
+    append_entry(
+        tmp_path,
+        DigestEntry(time=datetime(2026, 10, 18, 9, 0), kind="note", text="Standup\nana: deck"),
+    )
+
+    assert recent_labels(tmp_path) == ["ana"]

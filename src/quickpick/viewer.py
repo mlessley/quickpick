@@ -22,6 +22,7 @@ from quickpick.browser import open_in_new_window
 from quickpick.config import CONFIG_PATH, DATA_DIR, Config, load_config
 from quickpick.digest import (
     KIND_MARKS,
+    LABEL,
     DigestEntry,
     entry_id,
     list_days,
@@ -63,6 +64,7 @@ h2, .entry { scroll-margin-top: 40px; }
 .entry { display: flex; gap: 12px; padding: 6px 0; }
 .time { flex: none; width: 3.5em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .body { min-width: 0; flex: 1; }
+.body > span { white-space: pre-wrap; }
 .context { color: var(--muted); }
 a { color: var(--accent); }
 a.tag { color: var(--accent); text-decoration: none; }
@@ -138,11 +140,22 @@ def _render_tags(entry: DigestEntry) -> str:
 
 
 def _render_text(entry: DigestEntry) -> str:
-    """The entry's text, its opening label (`bob: `) a link to everything with that label."""
-    if entry.label is None:
+    """The entry's text, each labelled line's label (`idea: `) a link to everything with
+    that label."""
+    if not entry.labels:
         return escape(entry.text)
-    word, rest = entry.text.split(":", 1)
-    query = escape(urlencode({"days": "all", "label": entry.label}))
+    first, *more = entry.text.split("\n")
+    # Only a note's later lines carry labels; a todo's are plain text
+    later = [_render_line(line) if entry.kind == "note" else escape(line) for line in more]
+    return "\n".join([_render_line(first), *later])
+
+
+def _render_line(line: str) -> str:
+    match = LABEL.match(line)
+    if match is None:
+        return escape(line)
+    word, rest = line.split(":", 1)
+    query = escape(urlencode({"days": "all", "label": match[1].lower()}))
     return f'<a class="label" href="/?{query}">{escape(word)}:</a>{escape(rest)}'
 
 
@@ -204,7 +217,7 @@ def render_page(
         rendered = "".join(
             _render_entry(day, index, entry, token, _span_param(span), open_todo_ids)
             for index, entry in enumerate(entries)
-            if (tag is None or tag in entry.tags) and (label is None or entry.label == label)
+            if (tag is None or tag in entry.tags) and (label is None or label in entry.labels)
         )
         if rendered:
             heading = f'<h2 id="d-{day.isoformat()}">{day:%A} {day.isoformat()}</h2>'
@@ -256,7 +269,7 @@ def make_handler(
                 tag = params.get("tag", [None])[0]
                 label = params.get("label", [None])[0]
                 if tag is not None or label is not None:
-                    # Their entries can be from any day, e.g. a meeting weeks ago
+                    # Their entries can be from any day, e.g. weeks ago
                     span = None
                 all_days = list_days(digest_dir)
                 days = [
