@@ -1,0 +1,3 @@
+# Clipboard via pyperclip, keystroke-simulation via pywin32
+
+Quickpick uses `pyperclip` for clipboard reads/writes and `pywin32` (`ctypes`/`SendInput`) only for simulating GreenShot's capture hotkey (see [0002](./0002-greenshot-via-hotkey-simulation.md)). These look inconsistent side by side, so it's worth recording why they're different: the least-privilege concern behind [0001](./0001-registerhotkey-not-keyboard-hooking.md) is specifically about libraries that install a broad low-level keyboard *hook* watching every keystroke. `pyperclip` does nothing of the kind — it only reads/writes the OS clipboard — so there's no risk-reduction reason to replace it with `win32clipboard`, and it was already working in the original prototype.

@@ -1,0 +1,3 @@
+# Screenshot capture wraps GreenShot via hotkey simulation
+
+GreenShot has no documented CLI switch to trigger a capture. Quickpick's screenshot hotkey handler triggers it by simulating GreenShot's own configured global hotkey, rather than building a custom capture tool or leaving GreenShot's native hotkey untouched and disconnected from Quickpick. Wrapping it this way lets Quickpick close its own popup first if it's open (so the popup never ends up in the shot) and append a digest entry referencing the capture for later reconstruction — neither of which a bare, unwrapped native hotkey could provide — while still reusing GreenShot's existing region-capture UX instead of reimplementing it.

@@ -1,0 +1,96 @@
+import json
+import re
+from dataclasses import asdict, dataclass
+from datetime import date, datetime
+from pathlib import Path
+
+# "bob: said it's done" is labelled bob: a word starting with a letter, a colon, a space
+LABEL = re.compile(r"([A-Za-z][\w-]*): ")
+# A note starting with this is a todo, e.g. "[] call Jane"
+TODO_MARK = "[]"
+# Kinds whose text the user wrote, so it can carry a label (a screenshot's is a window title)
+LABELLED_KINDS = {"note", "todo", "done"}
+KIND_MARKS = {"screenshot": "[screenshot] ", "todo": "☐ ", "done": "☑ ", "timer": "⏱ "}
+
+
+@dataclass(frozen=True)
+class DigestEntry:
+    time: datetime
+    kind: str  # "note", "screenshot", "todo", "done" (a todo ticked off) or "timer"
+    text: str  # the note itself, a screenshot's capture context, or the todo it's about
+    path: str | None = None  # the screenshot file, for screenshot entries
+    tags: tuple[str, ...] = ()  # the tags that were on when the entry was made
+    ref: str | None = None  # for "done": the entry_id of the todo it ticks off
+
+    @property
+    def label(self) -> str | None:
+        """Who or what the entry is about, from its opening `word: `, e.g. "bob"."""
+        if self.kind not in LABELLED_KINDS:
+            return None
+        match = LABEL.match(self.text)
+        return match[1].lower() if match else None
+
+    @property
+    def display_text(self) -> str:
+        tags = "".join(f"#{tag} " for tag in self.tags)
+        return f"{self.time:%H:%M}  {tags}{KIND_MARKS.get(self.kind, '')}{self.text}"
+
+
+def entry_id(day: date, index: int) -> str:
+    """An entry's lasting address: its day and its position in that day's log."""
+    return f"{day.isoformat()}/{index}"
+
+
+def log_path(digest_dir: Path, day: date) -> Path:
+    return digest_dir / f"{day.isoformat()}.jsonl"
+
+
+def append_entry(digest_dir: Path, entry: DigestEntry) -> None:
+    record = asdict(entry) | {"time": entry.time.isoformat(timespec="seconds")}
+    # Kept out of the log while unset, so older and plainer entries stay as they were
+    for optional in ("tags", "ref"):
+        if not record[optional]:
+            del record[optional]
+    digest_dir.mkdir(parents=True, exist_ok=True)
+    with log_path(digest_dir, entry.time.date()).open("a", encoding="utf-8") as log:
+        log.write(json.dumps(record) + "\n")
+
+
+def list_days(digest_dir: Path) -> list[date]:
+    """Days that have a digest log, oldest first."""
+    days = []
+    for path in digest_dir.glob("*.jsonl"):
+        try:
+            days.append(date.fromisoformat(path.stem))
+        except ValueError:
+            continue
+    return sorted(days)
+
+
+def open_todos(digest_dir: Path) -> list[tuple[str, DigestEntry]]:
+    """(entry_id, todo) for every todo, from any day, that no done entry points at,
+    oldest first."""
+    todos: list[tuple[str, DigestEntry]] = []
+    done: set[str] = set()
+    for day in list_days(digest_dir):
+        for index, entry in enumerate(read_day(digest_dir, day)):
+            if entry.kind == "todo":
+                todos.append((entry_id(day, index), entry))
+            elif entry.kind == "done" and entry.ref:
+                done.add(entry.ref)
+    return [(todo_id, todo) for todo_id, todo in todos if todo_id not in done]
+
+
+def read_day(digest_dir: Path, day: date) -> list[DigestEntry]:
+    path = log_path(digest_dir, day)
+    if not path.exists():
+        return []
+    entries = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        record = json.loads(line)
+        record["time"] = datetime.fromisoformat(record["time"])
+        record["tags"] = tuple(record.get("tags", ()))
+        entries.append(DigestEntry(**record))
+    return entries

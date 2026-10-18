@@ -1,0 +1,3 @@
+# One global summon hotkey with sticky last-mode, not one hotkey per mode
+
+Quickpick registers only two global hotkeys total — summon and screenshot (see [0001](./0001-registerhotkey-not-keyboard-hooking.md)) — rather than a separate global hotkey per mode. The summon hotkey reopens the popup into whichever mode was last active; switching modes while the popup is open happens in-app via `Ctrl+Tab` / `Ctrl+Shift+Tab`, not additional OS-level hotkey registrations. Each extra `RegisterHotKey` call is more surface area with no real payoff here, since in-app cycling is never more than two keystrokes away across three modes.

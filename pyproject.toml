@@ -1,0 +1,43 @@
+[project]
+name = "quickpick"
+version = "0.1.0"
+description = "A keyboard-driven Windows popup: quick-copy strings, Edge and repo launchers, and a plain-text notes, todo and screenshot log with a local web viewer."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2",
+    "pyperclip>=1.9",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.scripts]
+quickpick = "quickpick.app:main"
+quickpick-viewer = "quickpick.viewer:main"
+quickpick-shortcuts = "quickpick.launch:install_shortcuts"
+
+[project.gui-scripts]
+quickpick-gui = "quickpick.launch:gui_main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quickpick"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
