@@ -41,7 +41,12 @@ The popup has modes; **Ctrl+Tab** / **Ctrl+Shift+Tab** switch between them, and 
 
 ### Screenshots
 
-**Ctrl+Alt+S** (works whether or not the popup is open) takes a screenshot through [GreenShot](https://getgreenshot.org/): Quickpick closes the popup, triggers GreenShot's region capture, and adds a `[screenshot]` entry to today's digest with the title of the window you were in and the saved image. Set GreenShot's destination to save directly to a file (Preferences, Destination: untick "Select destination dynamically", tick "Save directly"); Quickpick reads GreenShot's capture hotkey and save folder from its own settings.
+**Ctrl+Alt+S** (works whether or not the popup is open) takes a screenshot through [GreenShot](https://getgreenshot.org/): Quickpick closes the popup, triggers GreenShot's region capture, and adds a `[screenshot]` entry to today's digest with the title of the window you were in and the saved image. The image file is renamed to match, e.g. `2026-10-18 12_02_38-Untitled - Paint.png`, since GreenShot's own window title can be out of date. Quickpick reads GreenShot's capture hotkey and save folder from its own settings. In GreenShot's Preferences:
+
+- **Destination:** untick "Select destination dynamically"; tick "Save directly (using preferred file output settings)", plus "Copy to clipboard" if you want the image to paste straight away.
+- **Output:** leave "Copy file path to clipboard every time an image is saved" unticked; the path it copies is GreenShot's name, from before Quickpick renames the file.
+
+Captures taken with GreenShot's own hotkey (outside Quickpick) are untouched: no digest entry, and GreenShot's naming.
 
 **Prefixes** start the query with a launcher instead of the current mode. In every mode, put a **`:`** in front (`:g:home`); in Quick copy and Edge the plain form (`g:home`) works too, while in Notes a line without the leading `:` is always a note (so `g: …` is a labelled note). For example, **`g:home`** searches your repo shortcuts (the launcher store; **F2** edits it), and **`j:`** opens Jira: `j:123` is issue 123 in your default project, `j:ABC-42` that issue, `j:some words` a Jira text search, and a bare `j:` the default project. Type **`:`** to list the available prefixes; **Enter** on one fills it in (`:g:`). In Notes, a line starting with a colon that matches no prefix, like `:) great meeting`, is saved as a note. Unknown plain prefixes are searched as plain text.
 

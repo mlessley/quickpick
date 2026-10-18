@@ -1,6 +1,8 @@
 import configparser
 import os
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import win32api
@@ -36,6 +38,9 @@ def parse_greenshot_ini(text: str) -> GreenshotSettings:
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
+# Characters Windows doesn't allow in file names; GreenShot replaces them with "_" too
+UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+MAX_TITLE_CHARS = 80
 
 
 def list_files(folder: Path) -> set[str]:
@@ -55,6 +60,31 @@ def find_new_image(folder: Path, before: set[str]) -> Path | None:
     if not new_images:
         return None
     return max(new_images, key=lambda path: path.stat().st_mtime)
+
+
+def capture_name(started: datetime, context: str, suffix: str) -> str:
+    """The file name for a capture: its time and capture context, e.g.
+    "2026-10-18 12_02_38-Untitled - Paint.png", made safe for Windows."""
+    title = UNSAFE_FILENAME_CHARS.sub("_", context)[:MAX_TITLE_CHARS].strip().rstrip(".")
+    stamp = f"{started:%Y-%m-%d %H_%M_%S}"
+    return f"{stamp}-{title}{suffix}" if title else f"{stamp}{suffix}"
+
+
+def rename_capture(image: Path, started: datetime, context: str) -> Path:
+    """Rename GreenShot's file after the capture context, since GreenShot's own ${title}
+    can name a different window (ADR 0002); the file as it was if it can't be renamed."""
+    name = capture_name(started, context, image.suffix)
+    if image.name == name:
+        return image
+    target = image.with_name(name)
+    copy = 1
+    while target.exists():
+        copy += 1
+        target = image.with_name(f"{Path(name).stem} ({copy}){image.suffix}")
+    try:
+        return image.rename(target)
+    except OSError:
+        return image
 
 
 def read_greenshot_settings() -> GreenshotSettings:

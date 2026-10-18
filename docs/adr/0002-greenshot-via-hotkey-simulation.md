@@ -1,3 +1,7 @@
 # Screenshot capture wraps GreenShot via hotkey simulation
 
 GreenShot has no documented CLI switch to trigger a capture. Quickpick's screenshot hotkey handler triggers it by simulating GreenShot's own configured global hotkey, rather than building a custom capture tool or leaving GreenShot's native hotkey untouched and disconnected from Quickpick. Wrapping it this way lets Quickpick close its own popup first if it's open (so the popup never ends up in the shot) and append a digest entry referencing the capture for later reconstruction — neither of which a bare, unwrapped native hotkey could provide — while still reusing GreenShot's existing region-capture UX instead of reimplementing it.
+
+## Addendum (2026-10-18): Quickpick names the file
+
+GreenShot's `${title}` in its file name pattern can name a window other than the one captured: with an older capture open in the Photos app, every new file took that window's title (`…-2026-10-18 11_57_23-config - Notepad.png.png`). So once a capture lands, Quickpick renames it to its own capture time and **capture context** (`2026-10-18 12_02_38-Untitled - Paint.png`), the same title the digest entry records, and the entry links the renamed file. GreenShot's file name pattern no longer matters for captures taken through Quickpick; captures taken with GreenShot's own hotkey keep GreenShot's naming. A path GreenShot copies to the clipboard would be stale after the rename, so the setup asks GreenShot to copy the image instead.

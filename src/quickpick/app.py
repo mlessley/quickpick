@@ -32,11 +32,13 @@ from quickpick.modes import (
     TagMenu,
 )
 from quickpick.screenshot import (
+    capture_name,
     find_new_image,
     list_files,
     modifiers_held,
     press_hotkey,
     read_greenshot_settings,
+    rename_capture,
 )
 from quickpick.splash import (
     SplashContent,
@@ -65,6 +67,8 @@ MODIFIER_RELEASE_TIMEOUT_S = 2
 MODIFIER_POLL_MS = 20
 CAPTURE_TIMEOUT_S = 60
 CAPTURE_POLL_MS = 250
+# Tries at renaming a capture (one per poll) before keeping GreenShot's own file name
+RENAME_ATTEMPTS = 20
 
 FONT = ("Segoe UI", 10)
 BOLD_FONT = ("Segoe UI", 10, "bold")
@@ -713,8 +717,26 @@ class ScreenshotCapture:
         if image is None and self.folder and time.monotonic() < deadline:
             self.root.after(CAPTURE_POLL_MS, self._watch, started, context, before, deadline)
             return
-        if image is not None:
-            self.claimed.add(image.name)
+        if image is None:
+            self._log(started, context, None)
+        else:
+            self._rename(image, started, context, RENAME_ATTEMPTS)
+
+    def _rename(self, image: Path, started: datetime, context: str, attempts: int) -> None:
+        # Claimed while retrying too, so a second capture's watch doesn't take it
+        self.claimed.add(image.name)
+        renamed = rename_capture(image, started, context)
+        # GreenShot may still be writing the file, which locks it; try again shortly
+        if renamed == image and image.name != capture_name(started, context, image.suffix):
+            if attempts > 1:
+                self.root.after(
+                    CAPTURE_POLL_MS, self._rename, image, started, context, attempts - 1
+                )
+                return
+        self.claimed.add(renamed.name)
+        self._log(started, context, renamed)
+
+    def _log(self, started: datetime, context: str, image: Path | None) -> None:
         entry = DigestEntry(
             time=started,
             kind="screenshot",

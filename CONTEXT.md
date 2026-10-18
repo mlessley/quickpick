@@ -87,4 +87,4 @@ _Avoid_: Help page, about screen
 The separate, manually-launched, web-based application that renders the full digest across all days and can hand off a screenshot to an external editor for markup.
 
 **Capture context**:
-The active window's title at the moment of a screenshot, recorded to aid later recall of what the screenshot was for.
+The active window's title at the moment of a screenshot, recorded to aid later recall of what the screenshot was for. It also names the image file, in place of the title GreenShot would give it.
