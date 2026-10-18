@@ -14,7 +14,7 @@ from quickpick.store import StoreEntry, filter_entries, parse_store
 
 class Launcher(Mode, Protocol):
     """Handles queries starting with `<prefix>:` ahead of the current mode.
-    Its name is "<prefix>: <description>", shown in the mode label and the prefix menu."""
+    Its name is "<prefix>: <description>", shown in the mode bar and the prefix menu."""
 
     prefix: str
 

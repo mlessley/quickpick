@@ -83,15 +83,19 @@ class AddedList:
         for line in lines:
             if not line:
                 continue
-            record = json.loads(line)
-            self.entries.append(
-                AddedEntry(
+            # F2 opens this file in Notepad, so skip a line spoiled by hand rather than
+            # break the stash
+            try:
+                record = json.loads(line)
+                entry = AddedEntry(
                     time=datetime.fromisoformat(record["time"]),
                     label=record.get("label"),
                     value=record["value"],
                     masked=record.get("masked", False),
                 )
-            )
+            except (ValueError, KeyError, TypeError):
+                continue
+            self.entries.append(entry)
 
     def add(self, entry: AddedEntry) -> None:
         """Add entry at the top; the same value added before moves up instead."""

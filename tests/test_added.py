@@ -109,3 +109,15 @@ def test_search_matches_label_and_value_but_not_a_masked_value():
 
     assert AddedList.filter(entries, "ORDERS") == [entries[0]]
     assert AddedList.filter(entries, "token") == [entries[1]]
+
+
+def test_a_line_spoiled_by_hand_is_skipped(tmp_path):
+    path = tmp_path / "stash-added.jsonl"
+    path.write_text(
+        '{"time": "2026-10-18T14:05:00", "value": "kept"}\nnot json\n{"value": "no time"}\n',
+        encoding="utf-8",
+    )
+    added = AddedList(path, limit=100)
+    added.reload()
+
+    assert [entry.value for entry in added.entries] == ["kept"]

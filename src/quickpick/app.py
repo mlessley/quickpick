@@ -179,8 +179,8 @@ class Popup:
         self.timer_label = tk.Label(self.mode_bar, fg=self.colors.accent)
         self.timer_label.pack(side="right", padx=(0, 8))
         # A chip per active tag, left of the timer
-        self.status_bar = tk.Frame(self.mode_bar)
-        self.status_bar.pack(side="right", padx=(0, 8))
+        self.tag_chips = tk.Frame(self.mode_bar)
+        self.tag_chips.pack(side="right", padx=(0, 8))
         for widget in (self.mode_bar, self.mode_hint):
             widget.bind("<ButtonPress-1>", self._start_drag)
             widget.bind("<B1-Motion>", self._drag)
@@ -272,8 +272,8 @@ class Popup:
         self.root.mainloop()
 
     def toggle(self) -> None:
-        """The summon hotkey: open the popup, bring it back if it's open behind another
-        window, and close it if it already has focus (but never while pinned)."""
+        """The summon hotkey: open the popup, bring it forward if it's pinned and another
+        window has focus, and close it if it already has focus (but never while pinned)."""
         if not self.visible:
             self.show()
         elif not is_own_window(foreground_window()):
@@ -324,7 +324,7 @@ class Popup:
         control = event.state & CONTROL_MASK
         if self.quit_armed and not (control and event.keysym.lower() == "q"):
             self.quit_armed = False
-            self._update_mode_label()
+            self._update_mode_bar()
         if self.splash_shown and not (control and event.keysym.lower() == "h"):
             self.hide_splash()
 
@@ -553,7 +553,7 @@ class Popup:
             self._update_footer()
         return "break"
 
-    def _update_mode_label(self) -> None:
+    def _update_mode_bar(self) -> None:
         colors = self.colors
         for mode, label in zip(self.modes, self.mode_names, strict=True):
             current = mode is self.mode
@@ -619,14 +619,12 @@ class Popup:
         query_box = self.draft if self.draft_open else self.entry
         self.label_badge.pack(side="right", padx=(8, 6), before=query_box)
 
-    def _update_status(self) -> None:
+    def _update_tag_chips(self) -> None:
         """Redraw the right of the mode bar: a chip per active tag (click to switch off)."""
-        for child in self.status_bar.winfo_children():
+        for child in self.tag_chips.winfo_children():
             child.destroy()
         for tag in self.tags.active:
-            chip = tk.Label(
-                self.status_bar, text=f"#{tag} ×", fg=self.colors.accent, cursor="hand2"
-            )
+            chip = tk.Label(self.tag_chips, text=f"#{tag} ×", fg=self.colors.accent, cursor="hand2")
             chip.pack(side="left", padx=(6, 0))
             chip.bind("<ButtonRelease-1>", lambda _event, tag=tag: self._switch_off_tag(tag))
 
@@ -689,8 +687,8 @@ class Popup:
         ):
             handler = self.tag_menu
         self.view = handler or self.mode
-        self._update_mode_label()
-        self._update_status()
+        self._update_mode_bar()
+        self._update_tag_chips()
         self._update_label_badge(query)
         self._build_panes()
         results = self.view.search(self._view_query(query))
