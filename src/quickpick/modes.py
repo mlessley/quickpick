@@ -10,10 +10,13 @@ import pyperclip
 
 from quickpick.browser import Browser, choose_browser, open_in_new_window
 from quickpick.digest import (
+    KIND_MARKS,
     TODO_MARK,
     DigestEntry,
+    LineLabel,
     append_entry,
     carried_label,
+    line_labels,
     list_days,
     log_path,
     one_line,
@@ -40,6 +43,11 @@ HISTORY_DAYS = 7
 NOTES_EMPTY_HINT = "No notes yet today. Type and press Enter to add one."
 SAVED_EMPTY_HINT = "Nothing saved yet. F2 edits them in Notepad, one key~!~value per line."
 SCRATCH_EMPTY_HINT = "Type or paste text and press Ctrl+Enter to stash it here."
+SEARCH_HINT = "Type to search every day's notes. Every word must match, in any order."
+# Kinds a notes search looks through: what was written or captured, not bookkeeping
+SEARCHED_KINDS = {"note", "todo", "screenshot"}
+# The most matches a notes search lists, the newest
+SEARCH_LIMIT = 200
 
 # (pane, index) of the selected match
 Selection = tuple[int, int]
@@ -216,7 +224,7 @@ class NotesMode:
     name = "Notes"
     panes = ("Open todos", "Notes")
     shows_tail = True
-    hint = "Enter save · Shift+Enter lines · : labels · Ctrl+L clear · Ctrl+E edit · F2 viewer"
+    hint = "Enter save · Shift+Enter lines · : labels · Ctrl+F search · Ctrl+L clear · F2 viewer"
     notice: str | None = None
 
     def __init__(
@@ -428,3 +436,92 @@ def _log_rows(entries: list[DigestEntry]) -> list[Row]:
 
 def _uses(count: int) -> str:
     return "used once" if count == 1 else f"used {count} times"
+
+
+class NoteSearch:
+    """Notes mode's search (Ctrl+F): every day's notes, todos and screenshots that contain
+    every word typed, in log order, newest at the bottom."""
+
+    name = "Search notes"
+    panes = ("",)
+    shows_tail = False
+    hint = "Enter open in viewer · Ctrl+Enter copy · Esc back to writing"
+    notice: str | None = None
+
+    def __init__(self, digest_dir: Path, open_viewer: Callable[[str], None] | None = None) -> None:
+        self.digest_dir = digest_dir
+        self.open_viewer = open_viewer
+        # (day, position in the day, entry, the label of each of its lines)
+        self.entries: list[tuple[date, int, DigestEntry, list[LineLabel]]] = []
+        self.matches: list[tuple[date, int, DigestEntry]] = []
+
+    def reload(self) -> None:
+        self.entries = []
+        for day in list_days(self.digest_dir):
+            entries = read_day(self.digest_dir, day)
+            for index, (entry, labels) in enumerate(
+                zip(entries, line_labels(entries), strict=True)
+            ):
+                if entry.kind in SEARCHED_KINDS:
+                    self.entries.append((day, index, entry, labels))
+
+    def search(self, query: str) -> list[list[Row]]:
+        words = query.lower().split()
+        if not words:
+            self.matches = []
+            return [[Muted(SEARCH_HINT)]]
+        rows: list[Row] = []
+        self.matches = []
+        for day, index, entry, labels in self.entries:
+            lines = _searchable_lines(entry, labels)
+            everything = " ".join(lines)
+            if all(word in everything for word in words):
+                self.matches.append((day, index, entry))
+                rows.append(_search_row(day, entry, lines, words))
+        # The newest, as the list ends with them
+        self.matches = self.matches[-SEARCH_LIMIT:]
+        return [rows[-SEARCH_LIMIT:]]
+
+    def activate(self, query: str, selection: Selection | None, alternate: bool) -> str | None:
+        if selection is None or selection[1] >= len(self.matches):
+            return query
+        day, index, entry = self.matches[selection[1]]
+        if alternate:
+            pyperclip.copy(entry.text)
+            self.notice = "Copied the note"
+            return query
+        if self.open_viewer is None:
+            return query
+        self.open_viewer(f"?days=all#e-{day.isoformat()}-{index}")
+        self.notice = "Opened in the viewer"
+        return None
+
+    def edit(self) -> bool:
+        return False
+
+
+def _searchable_lines(entry: DigestEntry, labels: list[LineLabel]) -> list[str]:
+    """Each line of the entry as a search looks at it: lowercased, with the label it
+    carries (continued ones too) and the entry's tags."""
+    tags = " ".join(f"#{tag}" for tag in entry.tags)
+    lines = entry.text.split("\n")
+    # A screenshot's lines carry no labels
+    carried = [label for label, _continued in labels] if labels else [None] * len(lines)
+    return [
+        f"{line} {label or ''} {tags}".lower() for line, label in zip(lines, carried, strict=True)
+    ]
+
+
+def _search_row(day: date, entry: DigestEntry, lines: list[str], words: list[str]) -> str:
+    """The match as a row: its day and time, and the line most of the words are on."""
+    text_lines = entry.text.split("\n")
+    best = max(
+        range(len(lines)), key=lambda number: (sum(w in lines[number] for w in words), -number)
+    )
+    line = text_lines[best] if best == 0 else f"… {text_lines[best]}"
+    more = len(text_lines) - 1
+    if more:
+        line += f"  (+{more} line{'s' if more > 1 else ''})"
+    tags = "".join(f"#{tag} " for tag in entry.tags)
+    mark = KIND_MARKS.get(entry.kind, "")
+    return f"{day:%m-%d}  {entry.time:%H:%M}  {tags}{mark}{line}"

@@ -52,10 +52,10 @@ WINDOW_DAYS = 30
 PAGE_STYLE = """
 :root { color-scheme: light;
         --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --rule: #d2d2d7; --accent: #0067c0;
-        --label: #1a7f37; }
+        --label: #1a7f37; --target: #e1edfa; }
 :root[data-theme="dark"] { color-scheme: dark;
         --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --rule: #3a3a40; --accent: #4ea1ff;
-        --label: #5fd38d; }
+        --label: #5fd38d; --target: #1f3047; }
 body { margin: 0 auto; max-width: 960px; padding: 16px; background: var(--bg); color: var(--fg);
        font: 15px/1.5 system-ui, sans-serif; }
 .bar { margin: 0 0 8px; color: var(--muted); }
@@ -66,6 +66,7 @@ h2::before, h2::after { content: ""; flex: 1; border-top: 1px solid var(--rule);
 h2::before { flex: 0 0 24px; }
 h2, .entry { scroll-margin-top: 40px; }
 .entry { display: flex; gap: 12px; padding: 6px 0; }
+.entry:target { background: var(--target); outline: 4px solid var(--target); }
 .time { flex: none; width: 3.5em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .body { min-width: 0; flex: 1; }
 .body > span { white-space: pre-wrap; }
@@ -186,6 +187,8 @@ def _render_entry(
         )
     time = f'<span class="time">{entry.time:%H:%M}</span>'
     tags = _render_tags(entry)
+    # Every entry can be linked to, e.g. from a search in the popup
+    anchor = f'class="entry" id="e-{day.isoformat()}-{index}"'
     if entry.kind != "screenshot":
         mark = KIND_MARKS.get(entry.kind, "")
         if entry.kind == "todo" and open_todo_ids is not None:
@@ -193,16 +196,16 @@ def _render_entry(
         # Done and timer entries are bookkeeping, so they're shown quieter than notes
         quiet = ' class="context"' if entry.kind in ("done", "timer") else ""
         text = f"<span{quiet}>{mark}{_render_text(entry, labels)}</span>"
-        return f'<div class="entry">{time}<div class="body">{tags}{text}</div></div>'
+        return f'<div {anchor}>{time}<div class="body">{tags}{text}</div></div>'
     context = f'<div class="context">{tags}Screenshot: {escape(entry.text)}</div>'
     if not entry.path:
         return (
-            f'<div class="entry">{time}<div class="body">{context}'
+            f'<div {anchor}>{time}<div class="body">{context}'
             '<div class="context">(no image)</div></div></div>'
         )
     address = entry_id(day, index)
     return (
-        f'<div class="entry" id="e-{day.isoformat()}-{index}">{time}<div class="body">{context}'
+        f'<div {anchor}>{time}<div class="body">{context}'
         f'<img src="/image/{address}" alt="{escape(entry.text)}" loading="lazy">'
         '<div class="actions">'
         f"{_post_button(f'/edit/{address}', 'Edit in GreenShot', token, days)}"
@@ -456,7 +459,9 @@ class BackgroundViewer:
         self.reuse_open = reuse_open or reload_open_viewer
         self.server: ViewerServer | None = None
 
-    def open(self) -> None:
+    def open(self, path: str = "") -> None:
+        """Open the viewer, or at path (e.g. `?days=all#e-2026-10-14-0`) a new window there,
+        since a viewer already open can only be reloaded where it is."""
         if self.server is None:
             try:
                 self.server = make_server(self.config, self.digest_dir)
@@ -465,8 +470,8 @@ class BackgroundViewer:
                 pass
             else:
                 threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        if not self.reuse_open():
-            self.open_url(viewer_url(self.config))
+        if path or not self.reuse_open():
+            self.open_url(viewer_url(self.config) + path)
 
     def close(self) -> None:
         if self.server is not None:

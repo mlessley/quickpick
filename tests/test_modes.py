@@ -8,7 +8,9 @@ from quickpick.modes import (
     NOTES_EMPTY_HINT,
     SAVED_EMPTY_HINT,
     SCRATCH_EMPTY_HINT,
+    SEARCH_HINT,
     Muted,
+    NoteSearch,
     NotesMode,
     StashMode,
 )
@@ -187,3 +189,61 @@ def test_f2_in_notes_opens_the_viewer_and_hides_the_popup(tmp_path):
 
     assert mode.edit() is True
     assert opened == ["viewer"]
+
+
+def search_digest(tmp_path) -> None:
+    for day, hour, kind, text, tags in (
+        (date(2026, 10, 14), 9, "note", "idea: weekly summary", ()),
+        (date(2026, 10, 14), 10, "timer", "started 25 min: write the deck", ()),
+        (date(2026, 10, 15), 9, "note", "Standup\nana: sends the Deck\n... by Friday", ()),
+        (date(2026, 10, 15), 10, "todo", "book the room", ("planning",)),
+        (date(2026, 10, 16), 9, "screenshot", "Deck review - PowerPoint", ()),
+    ):
+        entry = DigestEntry(
+            time=datetime(day.year, day.month, day.day, hour, 0), kind=kind, text=text, tags=tags
+        )
+        append_entry(tmp_path, entry)
+
+
+def test_search_finds_every_word_in_any_order_across_all_days(tmp_path):
+    search_digest(tmp_path)
+    search = NoteSearch(tmp_path)
+    search.reload()
+
+    assert search.search("deck ANA") == [["10-15  09:00  … ana: sends the Deck  (+2 lines)"]]
+    assert search.search("deck") == [
+        [
+            "10-15  09:00  … ana: sends the Deck  (+2 lines)",
+            "10-16  09:00  [screenshot] Deck review - PowerPoint",
+        ]
+    ]
+
+
+def test_search_matches_tags_and_continued_labels_but_not_timers(tmp_path):
+    search_digest(tmp_path)
+    search = NoteSearch(tmp_path)
+    search.reload()
+
+    assert search.search("#planning") == [["10-15  10:00  #planning ☐ book the room"]]
+    assert search.search("friday ana") == [["10-15  09:00  … ... by Friday  (+2 lines)"]]
+    assert search.search("write") == [[]]
+
+
+def test_search_hints_until_something_is_typed(tmp_path):
+    search = NoteSearch(tmp_path)
+    search.reload()
+
+    assert search.search("  ") == [[Muted(SEARCH_HINT)]]
+
+
+def test_enter_opens_the_match_in_the_viewer_and_ctrl_enter_copies_it(tmp_path, clipboard):
+    search_digest(tmp_path)
+    opened: list[str] = []
+    search = NoteSearch(tmp_path, open_viewer=opened.append)
+    search.reload()
+    search.search("summary")
+
+    assert search.activate("summary", (0, 0), alternate=False) is None
+    assert opened == ["?days=all#e-2026-10-14-0"]
+    assert search.activate("summary", (0, 0), alternate=True) == "summary"
+    assert clipboard == ["idea: weekly summary"]

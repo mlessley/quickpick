@@ -73,7 +73,7 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
                 ("#tag", "Tag on / off"),
                 ("name: text", "Label a line"),
                 (": / ...", "List / continue labels"),
-                ("Ctrl+L / E", "Clear / edit the file"),
+                ("Ctrl+F / L / E", "Search / clear / edit file"),
             ],
         ),
     ]

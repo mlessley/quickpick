@@ -34,6 +34,7 @@ from quickpick.modes import (
     LabelMenu,
     Mode,
     Muted,
+    NoteSearch,
     NotesMode,
     Selection,
     StashMode,
@@ -125,12 +126,16 @@ class Popup:
         tag_menu: TagMenu | None = None,
         timer: FocusTimer | None = None,
         label_menu: LabelMenu | None = None,
+        note_search: NoteSearch | None = None,
     ) -> None:
         self.modes = modes
         # Notes mode's `#tag` menu, and the tags it switches on (shared with notes mode)
         self.tag_menu = tag_menu
         # Notes mode's `:` menu of every label used
         self.label_menu = label_menu
+        # Notes mode's search (Ctrl+F), and whether the query box is searching with it
+        self.note_search = note_search
+        self.searching = False
         self.tags = tag_menu.tags if tag_menu else ActiveTags()
         self.timer = timer
         self.colors = PALETTES[theme]
@@ -209,6 +214,8 @@ class Popup:
         # The query box, with room at its right end for the label badge
         entry_row = tk.Frame(self.root, background=self.colors.field)
         entry_row.pack(fill="x")
+        # Shown at the left of the query box while it's searching notes
+        self.search_mark = tk.Label(entry_row, text="🔍", background=self.colors.field)
         self.entry = tk.Entry(entry_row, textvariable=self.query_var, font=QUERY_FONT)
         self.entry.pack(side="left", fill="x", expand=True)
         self.label_badge = tk.Label(entry_row, background=self.colors.field)
@@ -249,7 +256,11 @@ class Popup:
             for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
                 self.entry.bind(sequence, lambda _event, kind=mode_type: self._go_to(kind))
         self.entry.bind("<Control-Delete>", self._on_remove)
-        for key, handler in (("l", self._on_clear), ("e", self._on_edit_today)):
+        for key, handler in (
+            ("l", self._on_clear),
+            ("e", self._on_edit_today),
+            ("f", self._on_search_key),
+        ):
             for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
                 self.entry.bind(sequence, handler)
         for app in apps or []:
@@ -424,6 +435,8 @@ class Popup:
         tags stay on."""
         had_focus = self._has_focus()
         self._close_draft()
+        if not for_capture:
+            self._stop_searching()
         self.root.withdraw()
         # The splash is for startup and Ctrl+H; the next summon opens on the lists
         self.hide_splash()
@@ -444,6 +457,7 @@ class Popup:
         self.root.after(UI_POLL_MS, self._poll_ui_calls, ui_calls)
 
     def _switch_mode(self, delta: int) -> str:
+        self._stop_searching()
         self.mode_index = (self.mode_index + delta) % len(self.modes)
         if not isinstance(self.mode, (NotesMode, StashMode)):
             self._close_draft()
@@ -742,6 +756,8 @@ class Popup:
             and parse_label_query(self._current_line(query)) is not None
         ):
             handler = self.label_menu
+        if self.searching and self.note_search:
+            handler = self.note_search
         self.view = handler or self.mode
         self._update_mode_bar()
         self._update_tag_chips()
@@ -766,7 +782,9 @@ class Popup:
             self.active_pane = next(
                 (pane for pane, count in enumerate(self.match_counts) if count), self.active_pane
             )
-        self._select(self.active_pane, 0)
+        # A notes search lists matches in log order, so it starts at the newest, the last
+        newest = self.match_counts[self.active_pane] - 1
+        self._select(self.active_pane, max(newest, 0) if self.searching else 0)
 
     def _view_query(self, query: str) -> str:
         """The query as the current view reads it: launchers get `/g home` as `home`."""
@@ -936,8 +954,30 @@ class Popup:
         return "break"
 
     def _on_escape(self, _event: object) -> str:
+        if self.searching:
+            # Back to writing first; the next Esc closes the popup
+            self._stop_searching()
+            self.query_var.set("")
+            return "break"
         self.hide()
         return "break"
+
+    def _on_search_key(self, _event: object) -> str:
+        """Ctrl+F in notes: the query box searches every day's notes, or writes again."""
+        if self.searching:
+            return self._on_escape(_event)
+        if self.note_search is None or not isinstance(self.mode, NotesMode) or self.draft_open:
+            return "break"
+        self.searching = True
+        self.note_search.reload()
+        self.search_mark.pack(side="left", padx=(6, 0), before=self.entry)
+        self.query_var.set("")
+        return "break"
+
+    def _stop_searching(self) -> None:
+        if self.searching:
+            self.searching = False
+            self.search_mark.pack_forget()
 
     def _on_edit(self, _event: object) -> str:
         if isinstance(self.view, StashMode):
@@ -1097,6 +1137,7 @@ def main() -> None:
         TagMenu(tags, DATA_DIR / "digest"),
         timer,
         LabelMenu(DATA_DIR / "digest"),
+        NoteSearch(DATA_DIR / "digest", open_viewer=viewer.open),
     )
 
     greenshot = read_greenshot_settings()

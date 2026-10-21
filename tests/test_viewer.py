@@ -373,3 +373,30 @@ def test_routes_open_a_days_file_and_show_a_screenshot_in_its_folder(tmp_path):
         server.shutdown()
 
     assert opened == [("notepad", tmp_path / "2026-10-20.jsonl"), ("folder", image)]
+
+
+def test_opening_at_an_entry_opens_a_new_window_there(tmp_path):
+    port = free_port()
+    opened, reused = [], []
+    viewer = BackgroundViewer(
+        Config(viewer_port=port),
+        tmp_path,
+        opened.append,
+        reuse_open=lambda: reused.append(True) or True,
+    )
+    try:
+        viewer.open("?days=all#e-2026-10-14-0")
+
+        # An open viewer can only be reloaded, not sent to an entry
+        assert reused == []
+        assert opened == [f"http://127.0.0.1:{port}/?days=all#e-2026-10-14-0"]
+    finally:
+        viewer.close()
+
+
+def test_every_entry_can_be_linked_to():
+    page = render_page(
+        [(TODAY, [note(TODAY, "standup")])], "tok", span=30, today=TODAY, first_day=TODAY
+    )
+
+    assert f'id="e-{TODAY.isoformat()}-0"' in page
