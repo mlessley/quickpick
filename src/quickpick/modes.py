@@ -2,33 +2,44 @@ import sqlite3
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 import pyperclip
 
-from quickpick.added import AddedEntry, AddedList, parse_addition
 from quickpick.browser import Browser, choose_browser, open_in_new_window
 from quickpick.digest import (
     TODO_MARK,
     DigestEntry,
     append_entry,
+    carried_label,
     list_days,
+    log_path,
     one_line,
     open_todos,
     read_day,
 )
 from quickpick.edge import Link, filter_links, parse_bookmarks, read_history
+from quickpick.scratch import ScratchEntry, ScratchList, parse_addition
 from quickpick.store import StoreEntry, filter_entries, parse_store
-from quickpick.tags import ActiveTags, parse_tag_query, recent_labels, recent_tags
+from quickpick.tags import (
+    ActiveTags,
+    label_counts,
+    parse_label_query,
+    parse_tag_query,
+    recent_labels,
+    recent_tags,
+)
 
 HISTORY_LOAD_LIMIT = 5000
 HISTORY_SHOW_LIMIT = 100
+# How many earlier days notes mode shows, greyed, above today
+HISTORY_DAYS = 7
 
 NOTES_EMPTY_HINT = "No notes yet today. Type and press Enter to add one."
 SAVED_EMPTY_HINT = "Nothing saved yet. F2 edits them in Notepad, one key~!~value per line."
-ADDED_EMPTY_HINT = "Type or paste text and press Ctrl+Enter to stash it here."
+SCRATCH_EMPTY_HINT = "Type or paste text and press Ctrl+Enter to stash it here."
 
 # (pane, index) of the selected match
 Selection = tuple[int, int]
@@ -50,7 +61,6 @@ class Mode(Protocol):
     # True: the last pane is a log, scrolled to the newest item with nothing selected; any
     # panes above it are short lists sized to their rows, and hidden while empty
     shows_tail: bool
-    accepts_prefixes: bool  # whether special-launcher prefixes apply (not for free-text input)
     hint: str  # the keys that work here, for the status bar
     # What the last activate did, for the status bar (e.g. `Copied "vpn"`); None if nothing
     # worth saying. The popup reads it once and clears it
@@ -71,22 +81,21 @@ class Mode(Protocol):
 
 
 class StashMode:
-    """Strings to copy: the saved list, edited by hand, and below it the added list,
+    """Strings to copy: the saved list, edited by hand, and below it the scratch list,
     filled from the popup with Ctrl+Enter."""
 
     name = "Stash"
-    panes = ("Saved", "Added")
+    panes = ("Saved", "Scratch")
     shows_tail = False
-    accepts_prefixes = True
     hint = "Enter copy · Ctrl+Enter stash · F2 edit · Ctrl+Del remove"
     notice: str | None = None
 
-    def __init__(self, store_path: Path, added: AddedList) -> None:
+    def __init__(self, store_path: Path, scratch: ScratchList) -> None:
         self.store_path = store_path
-        self.added = added
+        self.scratch = scratch
         self.entries: list[StoreEntry] = []
         self.matches: list[StoreEntry] = []
-        self.added_matches: list[AddedEntry] = []
+        self.scratch_matches: list[ScratchEntry] = []
         # A query whose label is already in use, stashed anyway on a second Ctrl+Enter
         self.confirming: str | None = None
 
@@ -95,16 +104,16 @@ class StashMode:
             self.entries = parse_store(self.store_path.read_text())
         except FileNotFoundError:
             self.entries = []
-        self.added.reload()
+        self.scratch.reload()
 
     def search(self, query: str) -> list[list[Row]]:
         self.matches = filter_entries(self.entries, query)
-        self.added_matches = AddedList.filter(self.added.entries, query)
+        self.scratch_matches = ScratchList.filter(self.scratch.entries, query)
         saved: list[Row] = [entry.display_text for entry in self.matches]
-        added: list[Row] = [entry.display_text for entry in self.added_matches]
+        scratch: list[Row] = [entry.display_text for entry in self.scratch_matches]
         return [
             saved or ([Muted(SAVED_EMPTY_HINT)] if not self.entries else []),
-            added or ([Muted(ADDED_EMPTY_HINT)] if not self.added.entries else []),
+            scratch or ([Muted(SCRATCH_EMPTY_HINT)] if not self.scratch.entries else []),
         ]
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> str | None:
@@ -119,11 +128,11 @@ class StashMode:
         self.notice = f'Copied "{name}"' if name else "Copied"
         return None
 
-    def _selected(self, selection: Selection | None) -> StoreEntry | AddedEntry | None:
+    def _selected(self, selection: Selection | None) -> StoreEntry | ScratchEntry | None:
         if selection is None:
             return None
         pane, index = selection
-        matches = self.matches if pane == 0 else self.added_matches
+        matches = self.matches if pane == 0 else self.scratch_matches
         return matches[index] if index < len(matches) else None
 
     def _add(self, query: str) -> str:
@@ -133,29 +142,29 @@ class StashMode:
             return query
         label, value, masked = addition
         in_use = {entry.key for entry in self.entries} | {
-            entry.label for entry in self.added.entries if entry.label
+            entry.label for entry in self.scratch.entries if entry.label
         }
         if label in in_use and self.confirming != query:
             self.confirming = query
             self.notice = f'"{label}" exists: Ctrl+Enter again adds it'
             return query
         self.confirming = None
-        self.added.add(AddedEntry(datetime.now(), label, value, masked))
-        self.notice = f'Stashed "{label}"' if label else "Stashed, at the top of Added"
+        self.scratch.add(ScratchEntry(datetime.now(), label, value, masked))
+        self.notice = f'Stashed "{label}"' if label else "Stashed, at the top of Scratch"
         return ""
 
     def remove(self, selection: Selection | None) -> bool:
-        """Ctrl+Delete: drop the selected added entry; saved entries are edited with F2."""
+        """Ctrl+Delete: drop the selected scratch entry; saved entries are edited with F2."""
         entry = self._selected(selection)
-        if not isinstance(entry, AddedEntry):
+        if not isinstance(entry, ScratchEntry):
             return False
-        self.added.remove(entry)
+        self.scratch.remove(entry)
         return True
 
     def edit(self, selection: Selection | None = None) -> bool:
         """F2: open the file of the list the selection is in."""
-        on_added = selection is not None and selection[0] == 1
-        subprocess.Popen(["notepad.exe", str(self.added.path if on_added else self.store_path)])
+        on_scratch = selection is not None and selection[0] == 1
+        subprocess.Popen(["notepad.exe", str(self.scratch.path if on_scratch else self.store_path)])
         return True
 
 
@@ -163,7 +172,6 @@ class BookmarksMode:
     name = "Bookmarks"
     panes = ("Bookmarks", "History")
     shows_tail = False
-    accepts_prefixes = True
     hint = "Enter open · Ctrl+Enter other browser · Tab other list"
     notice: str | None = None
 
@@ -208,8 +216,7 @@ class NotesMode:
     name = "Notes"
     panes = ("Open todos", "Notes")
     shows_tail = True
-    accepts_prefixes = False
-    hint = "Enter save · Shift+Enter more lines · [] todo · #tag · F2 viewer"
+    hint = "Enter save · Shift+Enter lines · : labels · Ctrl+L clear · Ctrl+E edit · F2 viewer"
     notice: str | None = None
 
     def __init__(
@@ -224,33 +231,67 @@ class NotesMode:
         self.open_viewer = open_viewer
         self.tags = tags or ActiveTags()
         self.entries: list[DigestEntry] = []
-        # The last earlier day with entries, shown greyed above today as context
-        self.previous_day: date | None = None
-        self.previous_entries: list[DigestEntry] = []
+        # The last week's earlier days with entries, shown greyed above today as context
+        self.earlier: list[tuple[date, list[DigestEntry]]] = []
+        # Ctrl+L: when the list was last cleared, and the row of its marker in the log
+        self.cleared_at: datetime | None = None
+        self.clear_row: int | None = None
         self.todos: list[tuple[str, DigestEntry]] = []
         # Labels already used, so the popup can flag a new one as a possible typo
         self.known_labels: list[str] = []
+        # The label a `...` note written now would continue
+        self.carried_label: str | None = None
 
     def reload(self) -> None:
         today = self.today()
-        earlier = [day for day in list_days(self.digest_dir) if day < today]
-        self.previous_day = earlier[-1] if earlier else None
-        self.previous_entries = read_day(self.digest_dir, earlier[-1]) if earlier else []
+        since = today - timedelta(days=HISTORY_DAYS)
+        self.earlier = [
+            (day, read_day(self.digest_dir, day))
+            for day in list_days(self.digest_dir)
+            if since <= day < today
+        ]
         self.entries = read_day(self.digest_dir, today)
         self.todos = open_todos(self.digest_dir)
         self.known_labels = recent_labels(self.digest_dir)
+        self.carried_label = carried_label(self.entries)
 
     def search(self, query: str) -> list[list[Row]]:
         rows: list[Row] = []
-        if self.previous_day:
-            day = self.previous_day
+        for day, entries in self.earlier:
             rows.append(Muted(f"── {day:%A} {day.isoformat()} ──"))
-            rows += [Muted(entry.display_text) for entry in self.previous_entries]
+            rows += [row if isinstance(row, Muted) else Muted(row) for row in _log_rows(entries)]
+        if self.earlier:
             rows.append("── Today ──")
-        rows += [entry.display_text for entry in self.entries]
-        if not self.entries:
+        cleared = (
+            self.cleared_at if self.cleared_at and self.cleared_at.date() == self.today() else None
+        )
+        self.clear_row = None
+        for entry, row in zip(self._shown(self.entries), _log_rows(self.entries), strict=True):
+            if cleared and self.clear_row is None and entry.time > cleared:
+                self.clear_row = len(rows)
+                rows.append(Muted(f"── cleared {cleared:%H:%M} · PageUp shows earlier ──"))
+            rows.append(row)
+        if cleared and self.clear_row is None:
+            self.clear_row = len(rows)
+            rows.append(Muted(f"── cleared {cleared:%H:%M} · PageUp shows earlier ──"))
+        if not self._shown(self.entries):
             rows.append(Muted(NOTES_EMPTY_HINT))
         return [[self._todo_row(todo) for _id, todo in self.todos], rows]
+
+    @staticmethod
+    def _shown(entries: list[DigestEntry]) -> list[DigestEntry]:
+        return [entry for entry in entries if entry.kind != "deleted"]
+
+    def edit_today(self) -> None:
+        """Ctrl+E: open today's digest file in Notepad, creating it if nothing's logged yet."""
+        path = log_path(self.digest_dir, self.today())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        subprocess.Popen(["notepad.exe", str(path)])
+
+    def clear(self, now: datetime) -> None:
+        """Ctrl+L: put everything so far above a marker, for the rest of the day."""
+        self.cleared_at = now
 
     def _todo_row(self, todo: DigestEntry) -> str:
         tags = "".join(f"#{tag} " for tag in todo.tags)
@@ -300,7 +341,6 @@ class TagMenu:
     name = "Tags: Enter turns one on or off"
     panes = ("",)
     shows_tail = False
-    accepts_prefixes = False
     hint = "Enter turns the tag on or off"
     notice: str | None = None
 
@@ -336,3 +376,55 @@ class TagMenu:
 
     def edit(self) -> bool:
         return False
+
+
+class LabelMenu:
+    """What notes mode shows while a line is `:` and the start of a label: every label
+    used, most recent first, and Enter starts the line with the chosen one."""
+
+    name = "Labels: Enter starts the line with one"
+    panes = ("",)
+    shows_tail = False
+    hint = "Enter uses the label · Up/Down choose"
+    notice: str | None = None
+
+    def __init__(self, digest_dir: Path) -> None:
+        self.digest_dir = digest_dir
+        self.counts: list[tuple[str, int]] = []
+        self.matches: list[str] = []
+
+    def reload(self) -> None:
+        self.counts = label_counts(self.digest_dir)
+
+    def search(self, query: str) -> list[list[str]]:
+        typed = parse_label_query(query) or ""
+        # Labels starting with what's typed first, then those with it further in
+        found = [(label, count) for label, count in self.counts if label.startswith(typed)]
+        found += [
+            (label, count)
+            for label, count in self.counts
+            if typed in label and not label.startswith(typed)
+        ]
+        self.matches = [label for label, _count in found]
+        return [[f"{label}:   {_uses(count)}" for label, count in found]]
+
+    def activate(self, query: str, selection: Selection | None, alternate: bool) -> str:
+        label = self.matches[selection[1]] if selection else parse_label_query(query)
+        return f"{label}: " if label else query
+
+    def edit(self) -> bool:
+        return False
+
+
+def _log_rows(entries: list[DigestEntry]) -> list[Row]:
+    """A day's entries as log rows: deleted ones left out, unreadable ones flagged."""
+    rows: list[Row] = []
+    for entry in entries:
+        if entry.kind == "deleted":
+            continue
+        rows.append(Muted(f"⚠ {entry.text}") if entry.kind == "unreadable" else entry.display_text)
+    return rows
+
+
+def _uses(count: int) -> str:
+    return "used once" if count == 1 else f"used {count} times"

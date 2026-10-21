@@ -1,4 +1,4 @@
-"""The focus timer: `t:25 write spec` counts down 25 minutes, logged to the digest."""
+"""The focus timer: `/t 25 write spec` counts down 25 minutes, logged to the digest."""
 
 import re
 from collections.abc import Callable
@@ -80,14 +80,13 @@ class FocusTimer:
 
 
 class TimerLauncher:
-    """The `t:` prefix: `t:25 write spec` starts a timer; a bare `t:` shows the running
+    """The `/t` command: `/t 25 write spec` starts a timer; a bare `/t` shows the running
     one, and Enter cancels it."""
 
-    prefix = "t"
-    name = "t: Focus timer"
+    command = "t"
+    name = "/t Focus timer"
     panes = ("",)
     shows_tail = False
-    accepts_prefixes = False
     hint = "Enter starts the timer, or cancels the running one"
     notice: str | None = None
 
@@ -98,19 +97,19 @@ class TimerLauncher:
         pass
 
     def search(self, query: str) -> list[list[Row]]:
-        rest = query[2:].strip()
+        rest = query.strip()
         if not rest and self.timer.running:
             remaining = format_remaining(self.timer.remaining())
             return [[f"⏱ {remaining} left · {self.timer.label}   Enter cancels it"]]
         parsed = parse_timer(rest)
         if parsed is None:
-            return [[Muted("Minutes, then what it's for, e.g. t:25 write spec")]]
+            return [[Muted("Minutes, then what it's for, e.g. /t 25 write spec")]]
         minutes, label = parsed
         replacing = " (replaces the running one)" if self.timer.running else ""
         return [[f"Start a {minutes}-minute timer: {label}{replacing}"]]
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> str | None:
-        rest = query[2:].strip()
+        rest = query.strip()
         if not rest and self.timer.running:
             self.timer.cancel()
             self.notice = "Timer cancelled"

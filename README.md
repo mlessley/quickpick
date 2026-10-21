@@ -12,7 +12,7 @@ I wanted one keystroke for the small things I do all day (paste a saved string, 
 
 - **A managed Windows laptop.** No admin rights, and nothing that watches the keyboard: global hotkeys go through `RegisterHotKey`, which only sees its own key combinations ([ADR-0001](./docs/adr/0001-registerhotkey-not-keyboard-hooking.md)).
 - **Keyboard first.** One summon hotkey, modes cycled inside the popup ([ADR-0003](./docs/adr/0003-single-summon-hotkey-with-in-app-mode-cycling.md)).
-- **Plain files I own.** Notes are an append-only JSON Lines file per day; nothing is edited in place, nothing goes to a cloud service.
+- **Plain files I own.** Notes are a JSON Lines file per day, added to in order and readable in any editor; nothing goes to a cloud service.
 - **Use what's already installed.** Edge's own bookmarks and history, GreenShot for screenshots, Outlook and Teams as they are.
 
 It's built in Python with Tk and pywin32. [CONTEXT.md](./CONTEXT.md) is the glossary of its terms and [docs/adr](./docs/adr) records the key design decisions. It was built with [Claude Code](https://claude.com/claude-code), working from a glossary, specs and tickets, test first.
@@ -32,14 +32,14 @@ Quickpick stays running in that console. At startup the popup opens centred on t
 
 The popup has three modes, **Notes**, **Stash** and **Bookmarks**. Click a mode's name, or press **Ctrl+N**, **Ctrl+S** or **Ctrl+B**, to go to it; **Ctrl+Tab** / **Ctrl+Shift+Tab** cycle through them. The popup reopens in whichever mode you used last. Drag the bar along the top to move the popup; it reopens where you left it until Quickpick restarts. A coloured edge shows the popup has your keystrokes: blue, or amber while pinned. The bar along the bottom lists the keys that work where you are, and for a few seconds after you do something, says what happened (`Note saved`, `Copied "vpn"`, `Timer set: 25 min, write spec`).
 
-- **Notes**: type a note and press **Enter** to add it to today's digest; the popup stays open and the list below shows today's notes, newest at the bottom, under the last earlier day with entries (greyed) for context. **PageUp/PageDown** scroll it. **F2** opens the full digest in the [viewer](#viewer), starting it inside Quickpick if it isn't already running. If the viewer is already open (as the active tab of an Edge or Chrome window), that window is brought forward and reloaded instead of opening another. **Ctrl+N** from any other mode jumps to Notes; pressed in Notes, it opens the viewer like F2 (so Ctrl+N twice opens the viewer from anywhere).
+- **Notes**: type a note and press **Enter** to add it to today's digest; the popup stays open and the list below shows today's notes, newest at the bottom, under the past week's (greyed) for context. **PageUp/PageDown** scroll it. **Ctrl+L** clears it, like a terminal: everything so far moves up out of view behind a `cleared 10:42` marker, and PageUp scrolls back to it (it lasts until the end of the day or a restart, and never changes the digest). **Ctrl+E** opens today's digest file in Notepad, to fix a typo or remove an entry by hand (see [Editing the digest by hand](#editing-the-digest-by-hand)). **F2** opens the full digest in the [viewer](#viewer), starting it inside Quickpick if it isn't already running. If the viewer is already open (as the active tab of an Edge or Chrome window), that window is brought forward and reloaded instead of opening another. **Ctrl+N** from any other mode jumps to Notes; pressed in Notes, it opens the viewer like F2 (so Ctrl+N twice opens the viewer from anywhere).
   - **Several lines**: **Shift+Enter** opens the query box up to several lines (in Stash too); there, **Enter** starts a new line and **Ctrl+Enter** saves. **Esc** goes back to one line, keeping what you wrote. The popup's lists show a long note's first line and how many more it has; the viewer shows it all.
   - **Todos**: a note starting with `[]` (e.g. `[] renew the parking permit`) is a todo. Open todos, from any day, are listed above the notes until ticked off: **Up/Down** select one, **Ctrl+D** ticks it off. The splash shows how many are open.
   - **Tags**: type `#project-x` alone and press **Enter** to switch that tag on (inventing it if it's new); the same again switches it off. Typing `#` lists your recent tags. Active tags show at the top right (click one to switch it off) and label every note, todo, screenshot and timer entry until the popup closes, so pin it (below) to keep a tag on for a while. In the viewer, click a tag to see everything with it.
-  - **Labels**: start a note or todo with a word, a colon and a space, e.g. `idea: weekly summary`, `book: Deep Work` or `url: https://…`, to label just that line. In a note of several lines, any line can start with its own label (e.g. a line per person in meeting notes). In the viewer each label is a link to every entry with it, from any day. Older notes written this way are labelled too. While you type one (on the cursor's line, in a note of several lines), a badge at the right of the query box shows it in green if you've used it before, or in amber as a new label, with the label it's probably a typo of (e.g. `new label: ideas · idea?`).
+  - **Labels**: start a note or todo with a word, a colon and a space, e.g. `idea: weekly summary`, `book: Deep Work` or `url: https://…`, to label just that line. In a note of several lines, any line can start with its own label. A line starting with `...` (or `…`) continues the label of the line before it, across notes too, until a line without a label or `...`: `idea: weekly summary` then `... grouped by tag` are both labelled `idea`. Type **`:`** at the start of a line to list every label you've used, most recent first; **Enter** starts the line with the chosen one. In the viewer each label is a link to every entry with it, from any day. Older notes written this way are labelled too. While you type one (on the cursor's line, in a note of several lines), a badge at the right of the query box shows it in green if you've used it before (`idea (continued)` on a `...` line), or in amber as a new label, with the label it's probably a typo of (e.g. `new label: ideas · idea?`).
 - **Stash**: strings to copy, in two lists. **Enter** or double-click copies the selected value.
   - **Saved**: your own list, `quick-copy.txt`. **F2** opens it in Notepad; changes show up the next time the popup opens.
-  - **Added**: a scratch list for later. Type or paste text and press **Ctrl+Enter** to add it at the top, labelled by its start (`SELECT id, name ⏎ FROM…  +30 chars · 3 lines`). Write `vpn ~!~ 10.0.0.1` to give it your own label, and start with `*` (`*token ~!~ abc123`) to hide the value, which then shows only as its label, size and time (`token · masked · 6 chars · 14:05`); a label already in use asks you to press Ctrl+Enter again. Values can span several lines (**Shift+Enter**, below). **Ctrl+Delete** removes the selected entry, and only the newest 100 are kept. **F2** with an added entry selected opens its file, `stash-added.jsonl`.
+  - **Scratch**: a list for later. Type or paste text and press **Ctrl+Enter** to add it at the top, labelled by its start (`SELECT id, name ⏎ FROM…  +30 chars · 3 lines`). Write `vpn ~!~ 10.0.0.1` to give it your own label, and start with `*` (`*token ~!~ abc123`) to hide the value, which then shows only as its label, size and time (`token · masked · 6 chars · 14:05`); a label already in use asks you to press Ctrl+Enter again. Values can span several lines (**Shift+Enter**, below). **Ctrl+Delete** removes the selected entry, and only the newest 100 are kept. **F2** with a scratch entry selected opens its file, `stash-scratch.jsonl`.
 - **Bookmarks**: lists your Edge bookmarks and, below them, your most recent history (up to 100 matches), both filtered by the same query. **Tab** / **Shift+Tab** move the selection between the two lists; **Enter** or double-click opens the selected item in a new browser window.
 
 ### Screenshots
@@ -51,13 +51,13 @@ The popup has three modes, **Notes**, **Stash** and **Bookmarks**. Click a mode'
 
 Captures taken with GreenShot's own hotkey (outside Quickpick) are untouched: no digest entry, and GreenShot's naming.
 
-**Prefixes** start the query with a launcher instead of the current mode. In every mode, put a **`:`** in front (`:g:home`); in Stash and Bookmarks the plain form (`g:home`) works too, while in Notes a line without the leading `:` is always a note (so `g: …` is a labelled note). For example, **`g:home`** searches your repo shortcuts (the launcher store; **F2** edits it), and **`j:`** opens Jira: `j:123` is issue 123 in your default project, `j:ABC-42` that issue, `j:some words` a Jira text search, and a bare `j:` the default project. Type **`:`** to list the available prefixes; **Enter** on one fills it in (`:g:`). In Notes, a line starting with a colon that matches no prefix, like `:) nice`, is saved as a note. Unknown plain prefixes are searched as plain text.
+**Commands** start the query with `/` and work in every mode: **`/g home`** searches your repo shortcuts (the launcher store; **F2** edits it), and **`/j`** opens Jira: `/j 123` is issue 123 in your default project, `/j ABC-42` that issue, `/j some words` a Jira text search, and a bare `/j` the default project. Type **`/`** to list the commands; **Enter** on one fills it in (`/g `). A line starting with `/` that isn't a command, like `/etc/hosts fixed`, stays a note (or a search).
 
 Wherever Quickpick opens a URL, **Enter** uses your default browser (Edge unless configured) and **Ctrl+Enter** uses the other one (Chrome / Edge).
 
 In Stash and Bookmarks: type to filter, **Up/Down** to move. **Esc** closes the popup in every mode.
 
-**Focus timer:** **`:t:25 write spec`** (or `t:25 write spec` outside Notes) starts a 25-minute timer (one at a time); a bare **`:t:`** shows it, and **Enter** cancels it. The time left shows at the top right; when it runs out, a notice pops up in the bottom-right corner with a sound. Starting, finishing and cancelling are logged to the digest.
+**Focus timer:** **`/t 25 write spec`** starts a 25-minute timer (one at a time); a bare **`/t`** shows it, and **Enter** cancels it. The time left shows at the top right; when it runs out, a notice pops up in the bottom-right corner with a sound. Starting, finishing and cancelling are logged to the digest.
 
 **Pin:** unpinned, the popup closes as soon as you click or switch into another window. **Ctrl+P** (or the 📌 at the top right) pins it: it stays open and on top of other windows, copying, opening links, switching apps and the viewer no longer close it, the summon hotkey only brings it forward, and after a screenshot it comes back. Only **Esc** closes it.
 
@@ -69,12 +69,12 @@ In Stash and Bookmarks: type to filter, **Up/Down** to move. **Esc** closes the 
 uv run quickpick-viewer
 ```
 
-Opens the digest in your browser as a log: notes and screenshots in time order, oldest at the top, opening scrolled to the newest at the bottom. It's served locally at `http://127.0.0.1:8765/`. It shows the last 30 days; the bar at the top loads 30 more days at a time, or everything (load everything before searching all of history with Ctrl+F). Reload the page to see new entries. **Edit in GreenShot** under a screenshot opens it in GreenShot's editor. **Ctrl+C** in the console stops the viewer; it runs independently of the popup. You rarely need to start it this way: **F2** in notes mode starts the same viewer inside Quickpick on first use (it stops when Quickpick quits), or just opens the page if a standalone viewer is already running.
+Opens the digest in your browser as a log: notes and screenshots in time order, oldest at the top, opening scrolled to the newest at the bottom. It's served locally at `http://127.0.0.1:8765/`. It shows the last 30 days; the bar at the top loads 30 more days at a time, or everything (load everything before searching all of history with Ctrl+F). Reload the page to see new entries. **Edit in GreenShot** under a screenshot opens it in GreenShot's editor, and **Show in folder** opens its folder with the image selected. **Edit in Notepad** beside each day's heading opens that day's digest file. **Ctrl+C** in the console stops the viewer; it runs independently of the popup. You rarely need to start it this way: **F2** in notes mode starts the same viewer inside Quickpick on first use (it stops when Quickpick quits), or just opens the page if a standalone viewer is already running.
 
 Data lives in `~/.quickpick-data/`:
 
 - `quick-copy.txt`: the stash, one `key~!~value` entry per line; prefix the key with `*` to hide its value in the list. Pass a different path as the first argument to use another store.
-- `stash-added.jsonl`: the stash's added list, one JSON entry per line, newest first; Quickpick rewrites it as entries come and go.
+- `stash-scratch.jsonl`: the stash's scratch list, one JSON entry per line, newest first; Quickpick rewrites it as entries come and go.
 - `launcher.txt`: the `g:` launcher store, one `key~!~url` entry per line (e.g. `quickpick~!~https://github.com/mlessley/quickpick`).
 - `digest/YYYY-MM-DD.jsonl`: one file per day of notes and screenshots, one JSON entry per line. Screenshot entries store the image's full path, so if you move images, update those paths too.
 - `screenshots/`: a suggested home for GreenShot's captures. Set it as GreenShot's storage location (Preferences, Output); Quickpick follows whatever folder GreenShot uses.
@@ -84,18 +84,22 @@ Data lives in `~/.quickpick-data/`:
   - `greenshot_hotkey` / `screenshot_dir`: override the capture hotkey and save folder otherwise read from GreenShot's settings.
   - `browser`: `"edge"` (default) or `"chrome"`; the browser Enter opens URLs in. Ctrl+Enter uses the other.
   - `theme`: `"dark"` (default) or `"light"`, for both the popup and the viewer.
-  - `jira_base_url` / `jira_default_project`: your Jira site (e.g. `"https://yourco.atlassian.net"`) and the project `j:123` resolves against. The built-in defaults are placeholders.
+  - `jira_base_url` / `jira_default_project`: your Jira site (e.g. `"https://yourco.atlassian.net"`) and the project `/j 123` resolves against. The built-in defaults are placeholders.
   - `greenshot_exe`: GreenShot's executable, used by the viewer's Edit button. Default: the per-user install under `%LOCALAPPDATA%\Programs\Greenshot`.
   - `viewer_port`: default `8765`.
-  - `stash_added_limit`: how many entries the stash's added list keeps, newest first. Default `100`.
+  - `stash_scratch_limit`: how many entries the stash's scratch list keeps, newest first. Default `100`.
   - `edge_profile`: the Edge profile folder whose bookmarks and history to list, e.g. `"Profile 1"`. Default `"Default"`.
-  - `apps`: the popup's app-switch keys, each `{"key": ..., "name": ..., "program": ..., "title": ...}`. `program` is the executable's file name (any case); the optional `title` keeps only windows whose title contains it. Keys are Ctrl and/or Alt plus a letter or digit, or an F-key; the popup's own keys (Ctrl+N/S/B/H/P/D/Q, Ctrl+A/C/V/X/Z, F2) are refused. A list here replaces the default, which is:
+  - `apps`: the popup's app-switch keys, each `{"key": ..., "name": ..., "program": ..., "title": ...}`. `program` is the executable's file name (any case); the optional `title` keeps only windows whose title contains it. Keys are Ctrl and/or Alt plus a letter or digit, or an F-key; the popup's own keys (Ctrl+N/S/B/H/P/D/Q/L/E, Ctrl+A/C/V/X/Z, F2) are refused. A list here replaces the default, which is:
     ```json
     "apps": [
       {"key": "ctrl+o", "name": "Outlook", "program": "OUTLOOK.EXE"},
       {"key": "ctrl+t", "name": "Teams", "program": "ms-teams.exe"}
     ]
     ```
+
+### Editing the digest by hand
+
+Each day is a file in `~/.quickpick-data/digest/`, one JSON entry per line, oldest first. **Ctrl+E** in Notes (or **Edit in Notepad** in the viewer) opens it in Notepad. Fix a typo by editing the `"text"`. To remove an entry, replace its whole line with `{}` rather than deleting the line: ticked-off todos point at their todo by its position in the day's file, and `{}` keeps every position in place. A line that can't be read is skipped and flagged (`line 7 of 2026-10-20.jsonl couldn't be read`) in both the popup and the viewer, so a slip is easy to find. Removing a screenshot's line leaves its image in the screenshots folder; **Show in folder** in the viewer finds it.
 
 ## License
 

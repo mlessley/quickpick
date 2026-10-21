@@ -20,7 +20,9 @@ LETTER_STAGGER_MS = 35
 LETTER_RISE = 10
 FRAME_MS = 15
 PAD = 20
-ROW = 19
+ROW = 18
+# Space between one group of keys and the next
+GROUP_GAP = 6
 
 # (key as pressed, what it does)
 Hotkey = tuple[str, str]
@@ -69,16 +71,16 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
                 ("[] text", "Add a todo"),
                 ("Ctrl+D", "Tick off a todo"),
                 ("#tag", "Tag on / off"),
-                ("name: text", "Label a note"),
+                ("name: text", "Label a line"),
+                (": / ...", "List / continue labels"),
+                ("Ctrl+L / E", "Clear / edit the file"),
             ],
         ),
     ]
     if config.apps:
         groups.append(("Apps", [(format_key(app.key), app.name) for app in config.apps]))
-    prefixes = [
-        (f":{launcher.prefix}:", launcher.name.split(": ", 1)[-1]) for launcher in launchers
-    ]
-    groups.append(("Prefixes", [*prefixes, (":", "List the prefixes")]))
+    commands = [tuple(launcher.name.split(" ", 1)) for launcher in launchers]
+    groups.append(("Commands · / lists them", commands))
     return groups
 
 
@@ -189,7 +191,7 @@ class SplashView:
                     action_x, y, text=action, anchor="nw", font=self.text_font, fill=colors.text
                 )
                 y += ROW
-            y += ROW // 2
+            y += GROUP_GAP
 
     def _animate(self, started: float) -> None:
         elapsed_ms = (time.monotonic() - started) * 1000

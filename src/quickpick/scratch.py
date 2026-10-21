@@ -1,4 +1,4 @@
-"""The stash's added list: entries added from the popup with Ctrl+Enter, newest first.
+"""The stash's scratch list: entries added from the popup with Ctrl+Enter, newest first.
 
 Unlike the saved stash file, which is edited by hand, this file is Quickpick's own, so it's
 rewritten freely; values may span several lines, so it's JSON Lines."""
@@ -16,7 +16,7 @@ LINE_BREAK_MARK = " ⏎ "
 
 
 @dataclass(frozen=True)
-class AddedEntry:
+class ScratchEntry:
     time: datetime
     label: str | None  # as typed (`label ~!~ value`), or None to show the value itself
     value: str
@@ -68,11 +68,11 @@ def parse_addition(query: str) -> tuple[str | None, str, bool] | None:
     return label, text, masked
 
 
-class AddedList:
+class ScratchList:
     def __init__(self, path: Path, limit: int) -> None:
         self.path = path
         self.limit = limit
-        self.entries: list[AddedEntry] = []
+        self.entries: list[ScratchEntry] = []
 
     def reload(self) -> None:
         try:
@@ -87,7 +87,7 @@ class AddedList:
             # break the stash
             try:
                 record = json.loads(line)
-                entry = AddedEntry(
+                entry = ScratchEntry(
                     time=datetime.fromisoformat(record["time"]),
                     label=record.get("label"),
                     value=record["value"],
@@ -97,13 +97,13 @@ class AddedList:
                 continue
             self.entries.append(entry)
 
-    def add(self, entry: AddedEntry) -> None:
+    def add(self, entry: ScratchEntry) -> None:
         """Add entry at the top; the same value added before moves up instead."""
         others = [old for old in self.entries if old.value != entry.value]
         self.entries = [entry, *others][: self.limit]
         self._save()
 
-    def remove(self, entry: AddedEntry) -> None:
+    def remove(self, entry: ScratchEntry) -> None:
         self.entries = [old for old in self.entries if old is not entry]
         self._save()
 
@@ -120,7 +120,7 @@ class AddedList:
         self.path.write_text("".join(lines), encoding="utf-8")
 
     @staticmethod
-    def filter(entries: list[AddedEntry], query: str) -> list[AddedEntry]:
+    def filter(entries: list[ScratchEntry], query: str) -> list[ScratchEntry]:
         needle = query.lower()
         return [
             entry

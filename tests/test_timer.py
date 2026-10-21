@@ -77,11 +77,11 @@ def test_t_prefix_starts_a_timer_and_a_bare_t_shows_and_cancels_the_running_one(
     timer = FocusTimer(tmp_path, ActiveTags(), clock)
     launcher = TimerLauncher(timer)
 
-    assert launcher.search("t:25 write spec") == [["Start a 25-minute timer: write spec"]]
-    assert launcher.activate("t:25 write spec", (0, 0), alternate=False) is None
+    assert launcher.search("25 write spec") == [["Start a 25-minute timer: write spec"]]
+    assert launcher.activate("25 write spec", (0, 0), alternate=False) is None
     assert timer.running
 
     clock.now += timedelta(minutes=6, seconds=18)
-    assert launcher.search("t:") == [["⏱ 18:42 left · write spec   Enter cancels it"]]
-    assert launcher.activate("t:", (0, 0), alternate=False) == ""
+    assert launcher.search("") == [["⏱ 18:42 left · write spec   Enter cancels it"]]
+    assert launcher.activate("", (0, 0), alternate=False) == ""
     assert not timer.running

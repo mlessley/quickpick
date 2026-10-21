@@ -9,22 +9,29 @@ from tkinter import ttk
 
 from pydantic import ValidationError
 
-from quickpick.added import AddedList
 from quickpick.app_switch import app_key_sequences, bring_to_front, list_windows, pick_window
 from quickpick.config import CONFIG_PATH, DATA_DIR, AppShortcut, load_config
-from quickpick.digest import DigestEntry, append_entry, open_todos, read_day
+from quickpick.digest import (
+    CONTINUATION,
+    DigestEntry,
+    append_entry,
+    note_line_labels,
+    open_todos,
+    read_day,
+)
 from quickpick.edge import profile_dir
 from quickpick.hotkey import Hotkey, HotkeyListener, HotkeyRegistrationError, parse_hotkey
 from quickpick.launchers import (
+    CommandMenu,
     JiraLauncher,
     Launcher,
-    PrefixMenu,
     StoreLauncher,
+    command_text,
     route,
-    strip_colon_form,
 )
 from quickpick.modes import (
     BookmarksMode,
+    LabelMenu,
     Mode,
     Muted,
     NotesMode,
@@ -32,6 +39,7 @@ from quickpick.modes import (
     StashMode,
     TagMenu,
 )
+from quickpick.scratch import ScratchList
 from quickpick.screenshot import (
     capture_name,
     find_new_image,
@@ -48,7 +56,13 @@ from quickpick.splash import (
     today_line,
     todos_line,
 )
-from quickpick.tags import ActiveTags, label_status, parse_tag_query, typed_label
+from quickpick.tags import (
+    ActiveTags,
+    label_status,
+    parse_label_query,
+    parse_tag_query,
+    typed_label,
+)
 from quickpick.theme import PALETTES, Theme
 from quickpick.timer import FocusTimer, TimerLauncher
 from quickpick.toast import show_toast
@@ -110,17 +124,20 @@ class Popup:
         splash: SplashContent | None = None,
         tag_menu: TagMenu | None = None,
         timer: FocusTimer | None = None,
+        label_menu: LabelMenu | None = None,
     ) -> None:
         self.modes = modes
         # Notes mode's `#tag` menu, and the tags it switches on (shared with notes mode)
         self.tag_menu = tag_menu
+        # Notes mode's `:` menu of every label used
+        self.label_menu = label_menu
         self.tags = tag_menu.tags if tag_menu else ActiveTags()
         self.timer = timer
         self.colors = PALETTES[theme]
         self.mode_index = 0
         self.launchers = launchers or []
-        self.prefix_menu = PrefixMenu(self.launchers)
-        # What handles the current query: the mode, or a launcher / the prefix menu
+        self.command_menu = CommandMenu(self.launchers)
+        # What handles the current query: the mode, or a launcher / the command menu
         self.view: Mode = modes[0]
         self.listboxes: list[tk.Listbox] = []
         # Per pane: its title label (None when untitled) and the frame holding its list
@@ -209,6 +226,10 @@ class Popup:
         self.draft.bind("<KeyRelease>", self._on_draft_changed)
         self.draft.bind("<<Paste>>", lambda _event: self.root.after_idle(self._on_draft_changed))
         self.draft.bind("<Control-Return>", self._save_draft)
+        # While the label menu is up, Enter and Up/Down work it instead of the text
+        self.draft.bind("<Return>", self._on_draft_menu_key(self._on_activate))
+        self.draft.bind("<Up>", self._on_draft_menu_key(self._on_arrow_up))
+        self.draft.bind("<Down>", self._on_draft_menu_key(self._on_arrow_down))
         self.draft.bind("<Escape>", self._close_draft)
         self.draft.bind("<Control-p>", self._toggle_pin)
         self.draft.bind("<Control-P>", self._toggle_pin)  # with Caps Lock on
@@ -228,6 +249,9 @@ class Popup:
             for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
                 self.entry.bind(sequence, lambda _event, kind=mode_type: self._go_to(kind))
         self.entry.bind("<Control-Delete>", self._on_remove)
+        for key, handler in (("l", self._on_clear), ("e", self._on_edit_today)):
+            for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
+                self.entry.bind(sequence, handler)
         for app in apps or []:
             for sequence in app_key_sequences(app.key):
                 self.entry.bind(sequence, lambda _event, app=app: self._switch_to_app(app))
@@ -347,6 +371,8 @@ class Popup:
             launcher.reload()
         if self.tag_menu:
             self.tag_menu.reload()
+        if self.label_menu:
+            self.label_menu.reload()
         if reset:
             self.query_var.set("")
         else:
@@ -537,6 +563,14 @@ class Popup:
             # Only the cursor moved: the badge follows its line
             self._update_label_badge(text)
 
+    def _on_draft_menu_key(
+        self, handler: Callable[[object], str]
+    ) -> Callable[[object], str | None]:
+        def on_key(event: object) -> str | None:
+            return handler(event) if self.view is self.label_menu else None
+
+        return on_key
+
     def _save_draft(self, event: object) -> str:
         """Ctrl+Enter in the draft: as Ctrl+Enter in the query box (save a note, stash)."""
         self._on_draft_changed()
@@ -600,15 +634,20 @@ class Popup:
     def _update_label_badge(self, query: str) -> None:
         """While a note's label is typed: green if it's been used before, amber if it's
         new, with the known label it's probably a typo of."""
-        if self.draft_open:
-            # Any line of a note can carry a label: the one the cursor is on
-            query = self.draft.get("insert linestart", "insert lineend")
-        label = typed_label(query) if isinstance(self.view, NotesMode) else None
-        if label is None:
+        if not isinstance(self.view, NotesMode):
             self.label_badge.pack_forget()
             return
-        known, suggestion = label_status(label, self.view.known_labels)
-        if known:
+        # Any line of a note can carry a label: in the draft, the one the cursor is on
+        line = self._current_line(query)
+        label = typed_label(line)
+        continued = self._continued_label(line)
+        if label is None and continued is None:
+            self.label_badge.pack_forget()
+            return
+        known, suggestion = label_status(label, self.view.known_labels) if label else (True, None)
+        if continued:
+            text, color = f"● {continued} (continued)", self.colors.label
+        elif known:
             text, color = f"● {label}", self.colors.label
         else:
             text, color = f"○ new label: {label}", self.colors.warning
@@ -618,6 +657,17 @@ class Popup:
         # Ahead of the query box, which would otherwise take all the room
         query_box = self.draft if self.draft_open else self.entry
         self.label_badge.pack(side="right", padx=(8, 6), before=query_box)
+
+    def _continued_label(self, line: str) -> str | None:
+        """For a `...` line in notes, the label it continues: from the draft's lines above
+        it, or else from today's notes."""
+        if not isinstance(self.view, NotesMode) or not line.startswith(CONTINUATION):
+            return None
+        carried = self.view.carried_label
+        if self.draft_open:
+            above = self.draft.get("1.0", "insert linestart").split("\n")[:-1]
+            _labels, carried = note_line_labels(above, carried)
+        return carried
 
     def _update_tag_chips(self) -> None:
         """Redraw the right of the mode bar: a chip per active tag (click to switch off)."""
@@ -679,13 +729,19 @@ class Popup:
 
     def _refresh_matches(self) -> None:
         query = self.query_var.get()
-        handler = route(query, self.launchers, self.prefix_menu, self.mode.accepts_prefixes)
+        handler = route(query, self.launchers, self.command_menu)
         if (
             self.tag_menu
             and isinstance(self.mode, NotesMode)
             and parse_tag_query(query) is not None
         ):
             handler = self.tag_menu
+        if (
+            self.label_menu
+            and isinstance(self.mode, NotesMode)
+            and parse_label_query(self._current_line(query)) is not None
+        ):
+            handler = self.label_menu
         self.view = handler or self.mode
         self._update_mode_bar()
         self._update_tag_chips()
@@ -704,7 +760,7 @@ class Popup:
                     listbox.insert(tk.END, row)
         if self.view.shows_tail:
             self._fit_panes_above_log()
-            self.listboxes[-1].see(tk.END)
+            self._scroll_log_to_newest()
             return
         if not self.match_counts[self.active_pane]:
             self.active_pane = next(
@@ -713,8 +769,16 @@ class Popup:
         self._select(self.active_pane, 0)
 
     def _view_query(self, query: str) -> str:
-        """The query as the current view reads it: launchers get `:g:home` as `g:home`."""
-        return strip_colon_form(query) if self.view in self.launchers else query
+        """The query as the current view reads it: launchers get `/g home` as `home`."""
+        if self.view is self.label_menu:
+            return self._current_line(query)
+        return command_text(query) if self.view in self.launchers else query
+
+    def _current_line(self, query: str) -> str:
+        """The line being written: the whole query, or in the draft the cursor's line."""
+        if self.draft_open:
+            return self.draft.get("insert linestart", "insert lineend")
+        return query
 
     def _fit_panes_above_log(self) -> None:
         """In a tail view, size the panes above the log to their rows, hiding empty ones."""
@@ -775,6 +839,42 @@ class Popup:
     def _has_rows_above_log(self) -> bool:
         return any(self.match_counts[:-1])
 
+    def _scroll_log_to_newest(self) -> None:
+        """Show the end of the log; after Ctrl+L, with the cleared marker at the top while
+        what's below it fits, as a terminal's clear leaves the cursor at the top."""
+        log = self.listboxes[-1]
+        clear_row = self.view.clear_row if isinstance(self.view, NotesMode) else None
+        if clear_row is None:
+            log.see(tk.END)
+            return
+        self.root.update_idletasks()
+        first, second = log.bbox(0), log.bbox(1)
+        row_height = (second[1] - first[1]) if first and second else 20
+        visible = max(1, log.winfo_height() // row_height)
+        below = log.size() - clear_row
+        if below >= visible:
+            log.see(tk.END)
+            return
+        # Blank rows under the newest, so the list can scroll the marker up to the top
+        for _ in range(visible - below):
+            log.insert(tk.END, "")
+        log.yview(clear_row)
+
+    def _on_clear(self, _event: object) -> str:
+        """Ctrl+L in notes: everything so far goes above a marker, like a terminal's clear."""
+        if isinstance(self.mode, NotesMode):
+            self.mode.clear(datetime.now())
+            self._refresh_matches()
+            self._say("Cleared · PageUp shows earlier")
+        return "break"
+
+    def _on_edit_today(self, _event: object) -> str:
+        """Ctrl+E in notes: today's digest file in Notepad, to correct it by hand."""
+        if isinstance(self.mode, NotesMode):
+            self.mode.edit_today()
+            self._after_action()
+        return "break"
+
     def _scroll_log(self, pages: int) -> str:
         if self.view.shows_tail:
             self.listboxes[-1].yview_scroll(pages, "pages")
@@ -812,6 +912,12 @@ class Popup:
         query = self._view_query(self.query_var.get())
         view = self.view
         next_query = view.activate(query, self._selection(), alternate)
+        if view is self.label_menu and self.draft_open and next_query is not None:
+            # Only the cursor's line becomes "label: "; the rest of the draft stays
+            self.draft.delete("insert linestart", "insert lineend")
+            self.draft.insert("insert linestart", next_query)
+            self._on_draft_changed()
+            return "break"
         if view.notice:
             # Said even if the popup then closes, so it's there if it's pinned
             self._say(view.notice)
@@ -843,7 +949,7 @@ class Popup:
         return "break"
 
     def _on_remove(self, _event: object) -> str:
-        """Ctrl+Delete in the stash: drop the selected added entry."""
+        """Ctrl+Delete in the stash: drop the selected scratch entry."""
         if isinstance(self.view, StashMode) and self.view.remove(self._selection()):
             self._say("Removed from the stash")
             self._refresh_matches()
@@ -961,6 +1067,11 @@ def main() -> None:
         sys.exit(f"Invalid config {CONFIG_PATH}:\n{error}")
 
     store_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA_DIR / "quick-copy.txt"
+    scratch_path = DATA_DIR / "stash-scratch.jsonl"
+    # The scratch list's file before it was renamed from "added"
+    earlier_scratch_path = DATA_DIR / "stash-added.jsonl"
+    if earlier_scratch_path.exists() and not scratch_path.exists():
+        earlier_scratch_path.rename(scratch_path)
     viewer = BackgroundViewer(config, DATA_DIR / "digest")
     tags = ActiveTags()
     timer = FocusTimer(DATA_DIR / "digest", tags)
@@ -976,9 +1087,7 @@ def main() -> None:
     popup = Popup(
         [
             NotesMode(DATA_DIR / "digest", open_viewer=viewer.open, tags=tags),
-            StashMode(
-                store_path, AddedList(DATA_DIR / "stash-added.jsonl", config.stash_added_limit)
-            ),
+            StashMode(store_path, ScratchList(scratch_path, config.stash_scratch_limit)),
             BookmarksMode(profile_dir(config.edge_profile), config.browser),
         ],
         launchers,
@@ -987,6 +1096,7 @@ def main() -> None:
         splash,
         TagMenu(tags, DATA_DIR / "digest"),
         timer,
+        LabelMenu(DATA_DIR / "digest"),
     )
 
     greenshot = read_greenshot_settings()

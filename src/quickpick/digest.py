@@ -16,7 +16,9 @@ KIND_MARKS = {"screenshot": "[screenshot] ", "todo": "☐ ", "done": "☑ ", "ti
 @dataclass(frozen=True)
 class DigestEntry:
     time: datetime
-    kind: str  # "note", "screenshot", "todo", "done" (a todo ticked off) or "timer"
+    # "note", "screenshot", "todo", "done" (a todo ticked off) or "timer"; and, holding the
+    # place of a line edited by hand, "deleted" or "unreadable"
+    kind: str
     text: str  # the note itself, a screenshot's capture context, or the todo it's about
     path: str | None = None  # the screenshot file, for screenshot entries
     tags: tuple[str, ...] = ()  # the tags that were on when the entry was made
@@ -48,6 +50,66 @@ class DigestEntry:
     def display_text(self) -> str:
         tags = "".join(f"#{tag} " for tag in self.tags)
         return f"{self.time:%H:%M}  {tags}{KIND_MARKS.get(self.kind, '')}{one_line(self.text)}"
+
+
+# A line starting with one of these continues the label of the line before it
+CONTINUATION = ("...", "…")
+
+# Per line: the label it carries, and whether that's continued from the line before
+LineLabel = tuple[str | None, bool]
+
+
+def note_line_labels(lines: list[str], carried: str | None) -> tuple[list[LineLabel], str | None]:
+    """The label each line of a note carries, given the label carried in from before it;
+    and the label carried on after it."""
+    labels: list[LineLabel] = []
+    for line in lines:
+        match = LABEL.match(line)
+        if match:
+            carried = match[1].lower()
+            labels.append((carried, False))
+        elif line.startswith(CONTINUATION) and carried:
+            labels.append((carried, True))
+        else:
+            carried = None
+            labels.append((None, False))
+    return labels, carried
+
+
+def line_labels(entries: list[DigestEntry]) -> list[list[LineLabel]]:
+    """Per entry of a day, the label of each of its lines. A note's `...` line takes the
+    label of the line before it, across notes too: only a note's line without one ends
+    the run, not a screenshot, timer or todo in between."""
+    result: list[list[LineLabel]] = []
+    carried: str | None = None
+    for entry in entries:
+        lines = entry.text.split("\n")
+        if entry.kind == "note":
+            labels, carried = note_line_labels(lines, carried)
+        elif entry.kind in LABELLED_KINDS:
+            first = entry.label
+            labels = [(first, False)] + [(None, False)] * (len(lines) - 1)
+        else:
+            labels = []
+        result.append(labels)
+    return result
+
+
+def day_labels(entries: list[DigestEntry]) -> list[tuple[str, ...]]:
+    """Per entry of a day, every label it carries, continued ones included."""
+    return [
+        tuple(dict.fromkeys(label for label, _continued in lines if label))
+        for lines in line_labels(entries)
+    ]
+
+
+def carried_label(entries: list[DigestEntry]) -> str | None:
+    """The label a `...` note written after these entries would continue."""
+    carried: str | None = None
+    for entry in entries:
+        if entry.kind == "note":
+            _labels, carried = note_line_labels(entry.text.split("\n"), carried)
+    return carried
 
 
 def one_line(text: str) -> str:
@@ -108,11 +170,22 @@ def read_day(digest_dir: Path, day: date) -> list[DigestEntry]:
     if not path.exists():
         return []
     entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line:
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
             continue
-        record = json.loads(line)
-        record["time"] = datetime.fromisoformat(record["time"])
-        record["tags"] = tuple(record.get("tags", ()))
-        entries.append(DigestEntry(**record))
+        # The file can be edited by hand (Ctrl+E). A line emptied to `{}` is deleted, and
+        # one that can't be read is flagged; both keep their place, so the positions that
+        # done entries point at stay right
+        placeholder_time = datetime.combine(day, datetime.min.time())
+        try:
+            record = json.loads(line)
+            if record == {}:
+                entries.append(DigestEntry(time=placeholder_time, kind="deleted", text=""))
+                continue
+            record["time"] = datetime.fromisoformat(record["time"])
+            record["tags"] = tuple(record.get("tags", ()))
+            entries.append(DigestEntry(**record))
+        except (ValueError, KeyError, TypeError):
+            problem = f"line {number} of {path.name} couldn't be read"
+            entries.append(DigestEntry(time=placeholder_time, kind="unreadable", text=problem))
     return entries

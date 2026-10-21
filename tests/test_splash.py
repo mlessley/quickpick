@@ -26,11 +26,17 @@ def test_hotkey_list_comes_from_the_config_and_the_launchers():
 
     groups = dict(hotkey_groups(config, launchers))
 
-    assert list(groups) == ["Anywhere", "In the popup", "In notes", "Apps", "Prefixes"]
+    assert list(groups) == [
+        "Anywhere",
+        "In the popup",
+        "In notes",
+        "Apps",
+        "Commands · / lists them",
+    ]
     assert groups["Anywhere"][0] == ("Ctrl+Shift+Q", "Show or hide the popup")
     assert ("Ctrl+H", "This help") in groups["In the popup"]
     assert groups["Apps"] == [("Ctrl+K", "Paint")]
-    assert groups["Prefixes"] == [(":g:", "Repo shortcuts"), (":", "List the prefixes")]
+    assert groups["Commands · / lists them"] == [("/g", "Repo shortcuts")]
 
 
 def test_apps_group_is_left_out_when_none_are_configured():

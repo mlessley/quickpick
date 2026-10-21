@@ -22,10 +22,13 @@ from quickpick.browser import open_in_new_window
 from quickpick.config import CONFIG_PATH, DATA_DIR, Config, load_config
 from quickpick.digest import (
     KIND_MARKS,
-    LABEL,
     DigestEntry,
+    LineLabel,
+    day_labels,
     entry_id,
+    line_labels,
     list_days,
+    log_path,
     open_todos,
     read_day,
 )
@@ -40,7 +43,8 @@ PAGE_TITLE = "Quickpick digest"
 VIEWER_BROWSERS = {"msedge.exe", "chrome.exe"}
 RELOAD_KEY = parse_hotkey("f5", require_modifier=False)
 
-ENTRY_ROUTE = re.compile(r"/(image|edit)/(\d{4}-\d{2}-\d{2})/(\d+)")
+ENTRY_ROUTE = re.compile(r"/(image|edit|show)/(\d{4}-\d{2}-\d{2})/(\d+)")
+DAY_ROUTE = re.compile(r"/notepad/(\d{4}-\d{2}-\d{2})")
 
 # The page's default window in calendar days, and how far each "more days" link extends it
 WINDOW_DAYS = 30
@@ -71,8 +75,11 @@ a.tag { color: var(--accent); text-decoration: none; }
 a.tag:hover { text-decoration: underline; }
 a.label { color: var(--label); font-weight: 600; text-decoration: none; }
 a.label:hover { text-decoration: underline; }
+a.label.continued { opacity: 0.55; font-weight: 400; }
 img { display: block; max-width: 100%; margin: 6px 0; border: 1px solid var(--rule); }
 form { margin: 0; }
+.actions { display: flex; gap: 8px; }
+h2 form button { font-size: 11px; font-weight: 400; padding: 0 6px; }
 """
 
 # Opens at the newest entry (or the one in the URL's fragment) and holds it in view while
@@ -139,23 +146,25 @@ def _render_tags(entry: DigestEntry) -> str:
     )
 
 
-def _render_text(entry: DigestEntry) -> str:
+def _render_text(entry: DigestEntry, labels: list[LineLabel]) -> str:
     """The entry's text, each labelled line's label (`idea: `) a link to everything with
-    that label."""
-    if not entry.labels:
+    that label; a `...` line shows the label it continues, greyed."""
+    if not any(label for label, _continued in labels):
         return escape(entry.text)
-    first, *more = entry.text.split("\n")
-    # Only a note's later lines carry labels; a todo's are plain text
-    later = [_render_line(line) if entry.kind == "note" else escape(line) for line in more]
-    return "\n".join([_render_line(first), *later])
+    return "\n".join(
+        _render_line(line, label, continued)
+        for line, (label, continued) in zip(entry.text.split("\n"), labels, strict=True)
+    )
 
 
-def _render_line(line: str) -> str:
-    match = LABEL.match(line)
-    if match is None:
+def _render_line(line: str, label: str | None, continued: bool) -> str:
+    if label is None:
         return escape(line)
+    query = escape(urlencode({"days": "all", "label": label}))
+    if continued:
+        link = f'<a class="label continued" href="/?{query}">{escape(label)}:</a>'
+        return f"{link} {escape(line)}"
     word, rest = line.split(":", 1)
-    query = escape(urlencode({"days": "all", "label": match[1].lower()}))
     return f'<a class="label" href="/?{query}">{escape(word)}:</a>{escape(rest)}'
 
 
@@ -163,10 +172,18 @@ def _render_entry(
     day: date,
     index: int,
     entry: DigestEntry,
+    labels: list[LineLabel],
     token: str,
     days: str,
     open_todo_ids: set[str] | None,
 ) -> str:
+    if entry.kind == "deleted":
+        return ""
+    if entry.kind == "unreadable":
+        warning = f'<span class="context">⚠ {escape(entry.text)}</span>'
+        return (
+            f'<div class="entry"><span class="time"></span><div class="body">{warning}</div></div>'
+        )
     time = f'<span class="time">{entry.time:%H:%M}</span>'
     tags = _render_tags(entry)
     if entry.kind != "screenshot":
@@ -175,7 +192,7 @@ def _render_entry(
             mark = "☐ " if entry_id(day, index) in open_todo_ids else "☑ "
         # Done and timer entries are bookkeeping, so they're shown quieter than notes
         quiet = ' class="context"' if entry.kind in ("done", "timer") else ""
-        text = f"<span{quiet}>{mark}{_render_text(entry)}</span>"
+        text = f"<span{quiet}>{mark}{_render_text(entry, labels)}</span>"
         return f'<div class="entry">{time}<div class="body">{tags}{text}</div></div>'
     context = f'<div class="context">{tags}Screenshot: {escape(entry.text)}</div>'
     if not entry.path:
@@ -187,10 +204,19 @@ def _render_entry(
     return (
         f'<div class="entry" id="e-{day.isoformat()}-{index}">{time}<div class="body">{context}'
         f'<img src="/image/{address}" alt="{escape(entry.text)}" loading="lazy">'
-        f'<form method="post" action="/edit/{address}">'
+        '<div class="actions">'
+        f"{_post_button(f'/edit/{address}', 'Edit in GreenShot', token, days)}"
+        f"{_post_button(f'/show/{address}', 'Show in folder', token, days)}"
+        "</div></div></div>"
+    )
+
+
+def _post_button(action: str, label: str, token: str, days: str) -> str:
+    return (
+        f'<form method="post" action="{action}">'
         f'<input type="hidden" name="token" value="{escape(token)}">'
         f'<input type="hidden" name="days" value="{days}">'
-        "<button>Edit in GreenShot</button></form></div></div>"
+        f"<button>{label}</button></form>"
     )
 
 
@@ -214,13 +240,18 @@ def render_page(
     """
     sections = []
     for day, entries in days:
+        labels = line_labels(entries)
+        carried = day_labels(entries)
         rendered = "".join(
-            _render_entry(day, index, entry, token, _span_param(span), open_todo_ids)
+            _render_entry(day, index, entry, labels[index], token, _span_param(span), open_todo_ids)
             for index, entry in enumerate(entries)
-            if (tag is None or tag in entry.tags) and (label is None or label in entry.labels)
+            if (tag is None or tag in entry.tags) and (label is None or label in carried[index])
         )
         if rendered:
-            heading = f'<h2 id="d-{day.isoformat()}">{day:%A} {day.isoformat()}</h2>'
+            notepad = _post_button(
+                f"/notepad/{day.isoformat()}", "Edit in Notepad", token, _span_param(span)
+            )
+            heading = f'<h2 id="d-{day.isoformat()}">{day:%A} {day.isoformat()}{notepad}</h2>'
             sections.append(heading + rendered)
     body = "".join(sections)
     if tag is not None or label is not None:
@@ -254,11 +285,22 @@ def find_screenshot(digest_dir: Path, day: str, index: str) -> Path | None:
     return Path(entry.path)
 
 
+def open_in_notepad(path: Path) -> None:
+    subprocess.Popen(["notepad.exe", str(path)])
+
+
+def show_in_folder(path: Path) -> None:
+    """Explorer, opened on the file's folder with the file selected."""
+    subprocess.Popen(["explorer.exe", f"/select,{path}"])
+
+
 def make_handler(
     digest_dir: Path,
     token: str,
     open_in_editor: Callable[[Path], None],
     theme: Theme = "dark",
+    open_in_notepad: Callable[[Path], None] = open_in_notepad,
+    show_in_folder: Callable[[Path], None] = show_in_folder,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -301,26 +343,40 @@ def make_handler(
             self._send(HTTPStatus.OK, content_type, image.read_bytes())
 
         def do_POST(self) -> None:
-            match = ENTRY_ROUTE.fullmatch(self.path)
-            if not match or match[1] != "edit":
+            entry_match = ENTRY_ROUTE.fullmatch(self.path)
+            day_match = DAY_ROUTE.fullmatch(self.path)
+            if not day_match and not (entry_match and entry_match[1] in ("edit", "show")):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode()
             form = parse_qs(body)
-            # Stops other sites in the browser from triggering the editor via this port
+            # Stops other sites in the browser from opening programs via this port
             if not hmac.compare_digest(form.get("token", [""])[0], token):
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
-            image = find_screenshot(digest_dir, match[2], match[3])
+            days = _span_param(parse_span(body))
+            if day_match:
+                log = log_path(digest_dir, date.fromisoformat(day_match[1]))
+                if not log.is_file():
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                open_in_notepad(log)
+                # Back to the same day with the same days loaded
+                self._redirect(f"/?days={days}#d-{day_match[1]}")
+                return
+            assert entry_match is not None
+            image = find_screenshot(digest_dir, entry_match[2], entry_match[3])
             if image is None or not image.is_file():
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
-            open_in_editor(image)
+            (open_in_editor if entry_match[1] == "edit" else show_in_folder)(image)
+            # Back to the same screenshot with the same days loaded
+            self._redirect(f"/?days={days}#e-{entry_match[2]}-{entry_match[3]}")
+
+        def _redirect(self, location: str) -> None:
             self.send_response(HTTPStatus.SEE_OTHER)
-            # Returns to the same screenshot with the same days loaded
-            days = _span_param(parse_span(body))
-            self.send_header("Location", f"/?days={days}#e-{match[2]}-{match[3]}")
+            self.send_header("Location", location)
             self.end_headers()
 
         def _send(self, status: HTTPStatus, content_type: str, body: bytes) -> None:

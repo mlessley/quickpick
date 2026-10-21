@@ -8,6 +8,8 @@ from pathlib import Path
 from quickpick.digest import LABEL, TODO_MARK, list_days, read_day
 
 TAG_QUERY = re.compile(r"#([\w-]*)")
+# A line that's just `:` and the start of a label: the label menu's query
+LABEL_QUERY = re.compile(r":([A-Za-z][\w-]*)?")
 # How far back the tag menu and the label badge look for tags and labels already used
 RECENT_DAYS = 60
 # How alike a new label must be to a known one to be suggested as the intended one
@@ -67,6 +69,22 @@ def recent_labels(digest_dir: Path) -> list[str]:
                 if label not in seen:
                     seen.append(label)
     return seen
+
+
+def label_counts(digest_dir: Path) -> list[tuple[str, int]]:
+    """Every label ever used, with how often, most recently used first."""
+    counts: dict[str, int] = {}
+    for day in reversed(list_days(digest_dir)):
+        for entry in reversed(read_day(digest_dir, day)):
+            for label in entry.labels:
+                counts[label] = counts.get(label, 0) + 1
+    return list(counts.items())
+
+
+def parse_label_query(line: str) -> str | None:
+    """The label typed so far when a line is `:` and the start of a word, else None."""
+    match = LABEL_QUERY.fullmatch(line)
+    return (match[1] or "").lower() if match else None
 
 
 def typed_label(query: str) -> str | None:

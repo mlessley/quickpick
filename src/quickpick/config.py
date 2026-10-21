@@ -54,8 +54,8 @@ class Config(BaseModel):
     jira_default_project: str = "PROJ"
     greenshot_exe: Path = Field(default_factory=_default_greenshot_exe)
     viewer_port: int = 8765
-    # Newest entries the stash's added list keeps; older ones drop off
-    stash_added_limit: int = Field(default=100, ge=1)
+    # Newest entries the stash's scratch list keeps; older ones drop off
+    stash_scratch_limit: int = Field(default=100, ge=1)
     apps: list[AppShortcut] = Field(default_factory=lambda: list(DEFAULT_APPS))
 
     @field_validator("apps")

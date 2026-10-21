@@ -1,10 +1,12 @@
 from datetime import date, datetime
 
 from quickpick.digest import DigestEntry, append_entry, read_day
-from quickpick.modes import NotesMode, TagMenu
+from quickpick.modes import LabelMenu, NotesMode, TagMenu
 from quickpick.tags import (
     ActiveTags,
+    label_counts,
     label_status,
+    parse_label_query,
     parse_tag_query,
     recent_labels,
     recent_tags,
@@ -112,3 +114,39 @@ def test_recent_labels_include_those_on_later_lines(tmp_path):
     )
 
     assert recent_labels(tmp_path) == ["ana"]
+
+
+def test_label_counts_cover_every_day_most_recently_used_first(tmp_path):
+    for day, hour, text in (
+        (1, 9, "ana: old"),
+        (2, 9, "ben: one"),
+        (3, 9, "ana: two"),
+        (3, 10, "Standup\nben: three\ncy: four"),
+    ):
+        append_entry(
+            tmp_path, DigestEntry(time=datetime(2025, 1, day, hour, 0), kind="note", text=text)
+        )
+
+    assert label_counts(tmp_path) == [("ben", 2), ("cy", 1), ("ana", 2)]
+
+
+def test_a_colon_and_part_of_a_word_is_a_label_query():
+    assert parse_label_query(":") == ""
+    assert parse_label_query(":an") == "an"
+    assert parse_label_query(":an x") is None
+    assert parse_label_query("ana:") is None
+    assert parse_label_query(":)") is None
+
+
+def test_label_menu_lists_matching_labels_and_fills_one_in(tmp_path):
+    for text in ("ana: one", "ben: two", "ana: three"):
+        append_entry(
+            tmp_path, DigestEntry(time=datetime(2026, 10, 20, 9, 0), kind="note", text=text)
+        )
+    menu = LabelMenu(tmp_path)
+    menu.reload()
+
+    assert menu.search(":") == [["ana:   used 2 times", "ben:   used once"]]
+    assert menu.search(":b") == [["ben:   used once"]]
+    assert menu.activate(":b", (0, 0), alternate=False) == "ben: "
+    assert menu.activate(":zed", None, alternate=False) == "zed: "

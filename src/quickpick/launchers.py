@@ -1,4 +1,4 @@
-"""The special launcher: prefixed queries (`g:...`) handled ahead of the current mode."""
+"""Slash commands: queries starting `/g`, `/j`, ... handled ahead of the current mode."""
 
 import re
 import subprocess
@@ -13,65 +13,51 @@ from quickpick.store import StoreEntry, filter_entries, parse_store
 
 
 class Launcher(Mode, Protocol):
-    """Handles queries starting with `<prefix>:` ahead of the current mode.
-    Its name is "<prefix>: <description>", shown in the mode bar and the prefix menu."""
+    """Handles queries starting with `/<command>` ahead of the current mode, given the text
+    after the command. Its name is "/<command> <description>", shown in the mode bar."""
 
-    prefix: str
-
-
-def split_prefix(query: str) -> tuple[str, str] | None:
-    """A special-launcher query: a one-character prefix then `:`, e.g. `g:quick`."""
-    if len(query) >= 2 and query[1] == ":":
-        return query[0].lower(), query[2:]
-    return None
+    command: str
 
 
-def strip_colon_form(query: str) -> str:
-    """A launcher's query without the colon form's leading `:` (`:g:home` -> `g:home`)."""
-    if query.startswith(":") and split_prefix(query[1:]):
-        return query[1:]
-    return query
+# "/g home": the command, then optionally a space and its text (which may span lines)
+COMMAND = re.compile(r"/(\S+)(?:\s(.*))?", re.DOTALL)
+
+
+def command_text(query: str) -> str:
+    """What a launcher reads: the query after its command (`/g home` -> `home`)."""
+    match = COMMAND.fullmatch(query)
+    return (match[2] or "") if match else query
 
 
 def route[L: Launcher](
-    query: str, launchers: Sequence[L], menu: "PrefixMenu", accepts_prefixes: bool
-) -> "L | PrefixMenu | None":
+    query: str, launchers: Sequence[L], menu: "CommandMenu"
+) -> "L | CommandMenu | None":
     """What handles query ahead of the current mode, or None to leave it to the mode.
 
-    In every mode a leading `:` is a command: `:g:home` goes to that launcher, and
-    anything else after the `:` shows the prefix menu, as long as the menu matches it;
-    otherwise the line is the mode's (`:x note` in notes is a note, and the notes stay in
-    view). The plain form, `g:home`, only works where the mode accepts prefixes (not in
-    notes, where it's a labelled note).
+    In every mode a leading `/` is a command: `/g home` goes to that launcher, and a
+    partly typed one shows the command menu, as long as the menu matches it; otherwise the
+    line is the mode's (`/etc/hosts fixed` in notes is a note, and the notes stay in view).
     """
-    if query.startswith(":"):
-        special = split_prefix(query[1:])
-        launcher = special and next(
-            (launcher for launcher in launchers if launcher.prefix == special[0]), None
-        )
+    match = COMMAND.fullmatch(query)
+    if match:
+        name = match[1].lower()
+        launcher = next((launcher for launcher in launchers if launcher.command == name), None)
         if launcher:
             return launcher
-        return menu if menu.has_match(query) else None
-    if not accepts_prefixes:
-        return None
-    special = split_prefix(query)
-    if special is None:
-        return None
-    return next((launcher for launcher in launchers if launcher.prefix == special[0]), None)
+    return menu if menu.has_match(query) else None
 
 
 class StoreLauncher:
-    """Opens URLs from a `key~!~url` store, e.g. the launcher store behind `g:`."""
+    """Opens URLs from a `key~!~url` store, e.g. the launcher store behind `/g`."""
 
     panes = ("",)
     shows_tail = False
-    accepts_prefixes = False
     hint = "Enter open · Ctrl+Enter other browser · F2 edit"
     notice: str | None = None
 
-    def __init__(self, prefix: str, description: str, store_path: Path, browser: Browser = "edge"):
-        self.prefix = prefix
-        self.name = f"{prefix}: {description}"
+    def __init__(self, command: str, description: str, store_path: Path, browser: Browser = "edge"):
+        self.command = command
+        self.name = f"/{command} {description}"
         self.store_path = store_path
         self.browser = browser
         self.entries: list[StoreEntry] = []
@@ -84,7 +70,7 @@ class StoreLauncher:
             self.entries = []
 
     def search(self, query: str) -> list[list[str]]:
-        self.matches = filter_entries(self.entries, query[len(self.prefix) + 1 :])
+        self.matches = filter_entries(self.entries, query)
         return [[f"{entry.key}  ({entry.value})" for entry in self.matches]]
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
@@ -99,14 +85,14 @@ class StoreLauncher:
         return True
 
 
-class PrefixMenu:
-    """Shown for a query starting with `:`: lists the prefixes, Enter fills one in."""
+class CommandMenu:
+    """Shown while a `/` command is partly typed (`/`, `/re`): lists the commands it could
+    be, and Enter fills one in."""
 
-    name = ": prefixes"
+    name = "/ commands"
     panes = ("",)
     shows_tail = False
-    accepts_prefixes = False
-    hint = "Enter picks the prefix"
+    hint = "Enter picks the command"
     notice: str | None = None
 
     def __init__(self, launchers: Sequence[Launcher]) -> None:
@@ -117,6 +103,9 @@ class PrefixMenu:
         pass
 
     def _matching(self, query: str) -> list[Launcher]:
+        # Only while the command is being typed: a space ends it
+        if not query.startswith("/") or any(char.isspace() for char in query):
+            return []
         needle = query[1:].lower()
         return [launcher for launcher in self.launchers if needle in launcher.name.lower()]
 
@@ -125,13 +114,17 @@ class PrefixMenu:
 
     def search(self, query: str) -> list[list[str]]:
         self.matches = self._matching(query)
-        return [[launcher.name for launcher in self.matches]]
+        return [[self._row(launcher) for launcher in self.matches]]
+
+    @staticmethod
+    def _row(launcher: Launcher) -> str:
+        command, _, description = launcher.name.partition(" ")
+        return f"{command}  {description}"
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> str:
         if selection is None:
             return query
-        # The colon form, which works in every mode, notes included
-        return f":{self.matches[selection[1]].prefix}:"
+        return f"/{self.matches[selection[1]].command} "
 
     def edit(self) -> bool:
         return False
@@ -141,7 +134,7 @@ ISSUE_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_]*-\d+")
 
 
 def jira_target(rest: str, base_url: str, default_project: str) -> tuple[str, str]:
-    """The synthetic entry for `j:<rest>`: its label and the URL it opens."""
+    """The synthetic entry for `/j <rest>`: its label and the URL it opens."""
     base = base_url.rstrip("/")
     text = rest.strip()
     if not text:
@@ -157,19 +150,18 @@ def jira_target(rest: str, base_url: str, default_project: str) -> tuple[str, st
 
 
 class JiraLauncher:
-    """`j:` opens a Jira issue: digits in the default project, a full key, or a text search."""
+    """`/j` opens a Jira issue: digits in the default project, a full key, or a text search."""
 
     panes = ("",)
     shows_tail = False
-    accepts_prefixes = False
     hint = "Enter open · Ctrl+Enter other browser"
     notice: str | None = None
 
     def __init__(
-        self, prefix: str, base_url: str, default_project: str, browser: Browser = "edge"
+        self, command: str, base_url: str, default_project: str, browser: Browser = "edge"
     ) -> None:
-        self.prefix = prefix
-        self.name = f"{prefix}: Jira issue"
+        self.command = command
+        self.name = f"/{command} Jira issue"
         self.base_url = base_url
         self.default_project = default_project
         self.browser = browser
@@ -179,7 +171,7 @@ class JiraLauncher:
         pass
 
     def search(self, query: str) -> list[list[str]]:
-        label, self.url = jira_target(query[2:], self.base_url, self.default_project)
+        label, self.url = jira_target(query, self.base_url, self.default_project)
         return [[label]]
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:

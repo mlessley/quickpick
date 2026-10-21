@@ -2,7 +2,17 @@ from datetime import date, datetime
 
 import pytest
 
-from quickpick.digest import DigestEntry, append_entry, list_days, one_line, read_day
+from quickpick.digest import (
+    DigestEntry,
+    append_entry,
+    carried_label,
+    day_labels,
+    line_labels,
+    list_days,
+    one_line,
+    open_todos,
+    read_day,
+)
 
 
 def test_entries_read_back_in_the_order_they_were_appended(tmp_path):
@@ -121,3 +131,51 @@ def test_every_line_of_a_note_can_carry_a_label_but_a_todos_only_its_first():
     assert entry("note").labels == ("ana", "ben")
     assert entry("note").label is None
     assert entry("todo").labels == ()
+
+
+def test_continuation_lines_carry_the_label_before_them():
+    def note(minute: int, text: str, kind: str = "note") -> DigestEntry:
+        return DigestEntry(time=datetime(2026, 10, 20, 9, minute), kind=kind, text=text)
+
+    entries = [
+        note(0, "ana: sends the deck"),
+        note(1, "... and the notes"),
+        note(2, "Room - Notepad", kind="screenshot"),
+        note(3, "…by Friday"),
+        note(4, "plain line"),
+        note(5, "... nothing to carry"),
+        note(6, "Standup\nben: owns QA\n... and the release\nother\n... not ben"),
+    ]
+
+    assert line_labels(entries) == [
+        [("ana", False)],
+        [("ana", True)],
+        [],
+        [("ana", True)],
+        [(None, False)],
+        [(None, False)],
+        [(None, False), ("ben", False), ("ben", True), (None, False), (None, False)],
+    ]
+    assert day_labels(entries)[1] == ("ana",)
+    assert carried_label(entries) is None
+    assert carried_label(entries[:4]) == "ana"
+
+
+def test_hand_edited_lines_keep_their_places(tmp_path):
+    (tmp_path / "2026-10-20.jsonl").write_text(
+        '{"time": "2026-10-20T09:00:00", "kind": "todo", "text": "first"}\n'
+        "{}\n"
+        "not json\n"
+        '{"time": "2026-10-20T09:03:00", "kind": "todo", "text": "fourth"}\n'
+        "\n"
+        '{"time": "2026-10-20T09:05:00", "kind": "done", "text": "fourth",'
+        ' "ref": "2026-10-20/3"}\n',
+        encoding="utf-8",
+    )
+
+    entries = read_day(tmp_path, date(2026, 10, 20))
+
+    assert [entry.kind for entry in entries] == ["todo", "deleted", "unreadable", "todo", "done"]
+    assert entries[2].text == "line 3 of 2026-10-20.jsonl couldn't be read"
+    # The done entry still points at "fourth", so only "first" is open
+    assert [todo.text for _id, todo in open_todos(tmp_path)] == ["first"]

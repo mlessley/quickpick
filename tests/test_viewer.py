@@ -1,16 +1,21 @@
 import socket
+import threading
+import urllib.error
 import urllib.request
 from datetime import date, datetime
+from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
 from quickpick.app_switch import Window
 from quickpick.config import Config
-from quickpick.digest import DigestEntry
+from quickpick.digest import DigestEntry, append_entry
 from quickpick.viewer import (
     BackgroundViewer,
     days_in_window,
     find_viewer_window,
+    make_handler,
     make_server,
     parse_span,
     render_page,
@@ -283,3 +288,88 @@ def test_each_labelled_line_of_a_note_links_its_label_and_any_finds_the_note():
     link = '<a class="label" href="/?days=all&amp;label=ana">ana:</a>'
     assert f"Standup\n{link} sends the deck" in log
     assert "Standup" in anas
+
+
+def test_a_continuation_shows_its_label_greyed_and_is_found_by_it():
+    notes = [
+        DigestEntry(time=datetime(2026, 10, 20, 9, 0), kind="note", text="ana: sends the deck"),
+        DigestEntry(time=datetime(2026, 10, 20, 9, 1), kind="note", text="... by Friday"),
+        DigestEntry(time=datetime(2026, 10, 20, 9, 2), kind="note", text="unrelated"),
+    ]
+
+    log = render_page([(TODAY, notes)], "tok", span=30, today=TODAY, first_day=TODAY)
+    anas = render_page(
+        [(TODAY, notes)], "tok", span=None, today=TODAY, first_day=TODAY, label="ana"
+    )
+
+    continued = '<a class="label continued" href="/?days=all&amp;label=ana">ana:</a>'
+    assert f"{continued} ... by Friday" in log
+    assert "by Friday" in anas and "unrelated" not in anas
+
+
+def test_each_day_and_screenshot_offers_its_file_and_hand_edits_show_as_such():
+    entries = [
+        DigestEntry(
+            time=datetime(2026, 10, 20, 9, 0), kind="screenshot", text="Paint", path="C:/s/a.png"
+        ),
+        DigestEntry(time=datetime(2026, 10, 20, 0, 0), kind="deleted", text=""),
+        DigestEntry(
+            time=datetime(2026, 10, 20, 0, 0),
+            kind="unreadable",
+            text="line 3 of 2026-10-20.jsonl couldn't be read",
+        ),
+    ]
+
+    page = render_page([(TODAY, entries)], "tok", span=30, today=TODAY, first_day=TODAY)
+
+    assert f'action="/notepad/{TODAY.isoformat()}"' in page
+    assert f'action="/show/{TODAY.isoformat()}/0"' in page
+    assert "⚠ line 3 of 2026-10-20.jsonl couldn&#x27;t be read" in page
+    assert page.count('class="entry"') == 2
+
+
+def post(port: int, path: str, token: str) -> int:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", data=f"token={token}&days=30".encode(), method="POST"
+    )
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        return opener.open(request).status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def test_routes_open_a_days_file_and_show_a_screenshot_in_its_folder(tmp_path):
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"png")
+    append_entry(
+        tmp_path,
+        DigestEntry(
+            time=datetime(2026, 10, 20, 9, 0), kind="screenshot", text="Paint", path=str(image)
+        ),
+    )
+    opened: list[tuple[str, Path]] = []
+    handler = make_handler(
+        tmp_path,
+        "tok",
+        lambda path: opened.append(("editor", path)),
+        open_in_notepad=lambda path: opened.append(("notepad", path)),
+        show_in_folder=lambda path: opened.append(("folder", path)),
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    try:
+        assert post(port, "/notepad/2026-10-20", "tok") == 303
+        assert post(port, "/show/2026-10-20/0", "tok") == 303
+        assert post(port, "/show/2026-10-20/0", "bad") == 403
+        assert post(port, "/notepad/2026-10-21", "tok") == 404
+    finally:
+        server.shutdown()
+
+    assert opened == [("notepad", tmp_path / "2026-10-20.jsonl"), ("folder", image)]
