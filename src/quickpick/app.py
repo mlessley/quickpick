@@ -373,7 +373,8 @@ class Popup:
         return "break"
 
     def show(self, reset: bool = True) -> None:
-        """reset=False brings the popup back as it was, e.g. after a screenshot."""
+        """reset=False brings the popup back as it was, e.g. after a screenshot. In notes
+        mode it always does: an unsent note survives the popup closing."""
         window = foreground_window()
         if not is_own_window(window):
             self.previous_window = window
@@ -384,7 +385,7 @@ class Popup:
             self.tag_menu.reload()
         if self.label_menu:
             self.label_menu.reload()
-        if reset:
+        if reset and not isinstance(self.mode, NotesMode):
             self.query_var.set("")
         else:
             self._refresh_matches()
@@ -425,9 +426,8 @@ class Popup:
 
     def _after_action(self) -> None:
         """An action is done (copied, opened, switched): close, unless pinned."""
-        if self.pinned:
-            self.query_var.set("")
-        else:
+        self.query_var.set("")
+        if not self.pinned:
             self.hide()
 
     def hide(self, for_capture: bool = False) -> None:
@@ -435,8 +435,10 @@ class Popup:
         tags stay on."""
         had_focus = self._has_focus()
         self._close_draft()
-        if not for_capture:
+        if not for_capture and self.searching:
+            # A search isn't a note to keep for next time
             self._stop_searching()
+            self.query_var.set("")
         self.root.withdraw()
         # The splash is for startup and Ctrl+H; the next summon opens on the lists
         self.hide_splash()
