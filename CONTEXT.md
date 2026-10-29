@@ -92,7 +92,7 @@ The popup's help screen, shown in place of the lists at startup (with an animate
 _Avoid_: Help page, about screen
 
 **Viewer**:
-The separate, manually-launched, web-based application that renders the full digest across all days and can hand off a screenshot to an external editor for markup.
+The separate, manually-launched, web-based application that renders the full digest across all days, with basic formatting and clickable links in notes, and can hand off a screenshot to an external editor for markup.
 
 **Capture context**:
 The active window's title at the moment of a screenshot, recorded to aid later recall of what the screenshot was for. It also names the image file, in place of the title GreenShot would give it.

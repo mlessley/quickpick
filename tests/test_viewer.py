@@ -400,3 +400,26 @@ def test_every_entry_can_be_linked_to():
     )
 
     assert f'id="e-{TODAY.isoformat()}-0"' in page
+
+
+def test_notes_are_formatted_with_links_and_labels_still_linked():
+    entry = note(TODAY, "ana: **ship** it, see https://example.com/pr/1.\n- one\n# Heading")
+
+    page = render_page([(TODAY, [entry])], "tok", span=30, today=TODAY, first_day=TODAY)
+
+    label = '<a class="label" href="/?days=all&amp;label=ana">ana:</a>'
+    link = (
+        '<a href="https://example.com/pr/1" target="_blank" rel="noopener noreferrer">'
+        "https://example.com/pr/1</a>"
+    )
+    assert f"{label} <strong>ship</strong> it, see {link}.\n• one\n" in page
+    assert '<span class="h1">Heading</span>' in page
+
+
+def test_a_fenced_block_shows_as_code_without_labels_or_formatting():
+    entry = note(TODAY, "Diagram:\n```mermaid\nana: **x** --> b\n```\nafter")
+
+    page = render_page([(TODAY, [entry])], "tok", span=30, today=TODAY, first_day=TODAY)
+
+    assert 'Diagram:<code class="block">ana: **x** --&gt; b</code>after' in page
+    assert "```" not in page

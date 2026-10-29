@@ -33,6 +33,7 @@ from quickpick.digest import (
     read_day,
 )
 from quickpick.hotkey import parse_hotkey
+from quickpick.markup import format_line, inline, split_code
 from quickpick.screenshot import press_hotkey
 from quickpick.theme import Theme
 from quickpick.windows import foreground_window
@@ -52,10 +53,10 @@ WINDOW_DAYS = 30
 PAGE_STYLE = """
 :root { color-scheme: light;
         --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --rule: #d2d2d7; --accent: #0067c0;
-        --label: #1a7f37; --target: #e1edfa; }
+        --label: #1a7f37; --target: #e1edfa; --code: #ececef; }
 :root[data-theme="dark"] { color-scheme: dark;
         --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --rule: #3a3a40; --accent: #4ea1ff;
-        --label: #5fd38d; --target: #1f3047; }
+        --label: #5fd38d; --target: #1f3047; --code: #26262b; }
 body { margin: 0 auto; max-width: 960px; padding: 16px; background: var(--bg); color: var(--fg);
        font: 15px/1.5 system-ui, sans-serif; }
 .bar { margin: 0 0 8px; color: var(--muted); }
@@ -71,6 +72,12 @@ h2, .entry { scroll-margin-top: 40px; }
 .body { min-width: 0; flex: 1; }
 .body > span { white-space: pre-wrap; }
 .context { color: var(--muted); }
+code { padding: 0 3px; border-radius: 3px; background: var(--code);
+       font: 13px/1.45 Consolas, ui-monospace, monospace; }
+code.block { display: block; margin: 4px 0; padding: 6px 8px; white-space: pre; overflow-x: auto; }
+.h1, .h2, .h3 { font-weight: 600; }
+.h1 { font-size: 1.3em; }
+.h2 { font-size: 1.15em; }
 a { color: var(--accent); }
 a.tag { color: var(--accent); text-decoration: none; }
 a.tag:hover { text-decoration: underline; }
@@ -148,25 +155,37 @@ def _render_tags(entry: DigestEntry) -> str:
 
 
 def _render_text(entry: DigestEntry, labels: list[LineLabel]) -> str:
-    """The entry's text, each labelled line's label (`idea: `) a link to everything with
-    that label; a `...` line shows the label it continues, greyed."""
-    if not any(label for label, _continued in labels):
-        return escape(entry.text)
-    return "\n".join(
-        _render_line(line, label, continued)
-        for line, (label, continued) in zip(entry.text.split("\n"), labels, strict=True)
-    )
+    """The entry's text, formatted (see markup), each labelled line's label (`idea: `) a
+    link to everything with that label; a `...` line shows the label it continues, greyed.
+    A fenced block is shown as code, exactly as typed."""
+    lines = entry.text.split("\n")
+    labels = labels or [(None, False)] * len(lines)
+    html = ""
+    after_line = False
+    for kind, run in split_code(lines):
+        if kind == "code":
+            # A block ends the line before it and starts a new one after it by itself
+            code = escape("\n".join(lines[index] for index in run))
+            html += f'<code class="block">{code}</code>'
+            after_line = False
+            continue
+        for index in run:
+            if after_line:
+                html += "\n"
+            html += _render_line(lines[index], *labels[index])
+            after_line = True
+    return html
 
 
 def _render_line(line: str, label: str | None, continued: bool) -> str:
     if label is None:
-        return escape(line)
+        return format_line(line)
     query = escape(urlencode({"days": "all", "label": label}))
     if continued:
         link = f'<a class="label continued" href="/?{query}">{escape(label)}:</a>'
-        return f"{link} {escape(line)}"
+        return f"{link} {inline(line)}"
     word, rest = line.split(":", 1)
-    return f'<a class="label" href="/?{query}">{escape(word)}:</a>{escape(rest)}'
+    return f'<a class="label" href="/?{query}">{escape(word)}:</a>{inline(rest)}'
 
 
 def _render_entry(
