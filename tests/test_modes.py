@@ -4,11 +4,13 @@ import pyperclip
 import pytest
 
 from quickpick.digest import DigestEntry, append_entry
+from quickpick.edge import Link
 from quickpick.modes import (
     NOTES_EMPTY_HINT,
     SAVED_EMPTY_HINT,
     SCRATCH_EMPTY_HINT,
     SEARCH_HINT,
+    BookmarksMode,
     Muted,
     NoteSearch,
     NotesMode,
@@ -247,3 +249,17 @@ def test_enter_opens_the_match_in_the_viewer_and_ctrl_enter_copies_it(tmp_path, 
     assert opened == ["?days=all#e-2026-10-14-0"]
     assert search.activate("summary", (0, 0), alternate=True) == "summary"
     assert clipboard == ["idea: weekly summary"]
+
+
+def test_history_rows_start_with_when_they_were_visited(tmp_path):
+    mode = BookmarksMode(tmp_path, now=lambda: datetime(2026, 10, 28, 15, 0))
+    mode.bookmarks = [Link(name="Jira", url="https://jira.example.com")]
+    mode.history = [
+        Link("Today", "https://a.example.com", visited=datetime(2026, 10, 28, 9, 5)),
+        Link("Monday", "https://b.example.com", visited=datetime(2026, 10, 26, 9, 5)),
+    ]
+
+    assert mode.search("") == [
+        ["Jira  (https://jira.example.com)"],
+        ["09:05  Today  (https://a.example.com)", "Mon  Monday  (https://b.example.com)"],
+    ]

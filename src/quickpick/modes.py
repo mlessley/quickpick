@@ -23,7 +23,7 @@ from quickpick.digest import (
     open_todos,
     read_day,
 )
-from quickpick.edge import Link, filter_links, parse_bookmarks, read_history
+from quickpick.edge import Link, filter_links, parse_bookmarks, read_history, visit_label
 from quickpick.scratch import ScratchEntry, ScratchList, parse_addition
 from quickpick.store import StoreEntry, filter_entries, parse_store
 from quickpick.tags import (
@@ -176,6 +176,11 @@ class StashMode:
         return True
 
 
+def _link_row(link: Link, when: str = "") -> str:
+    row = f"{link.name}  ({link.url})"
+    return f"{when}  {row}" if when else row
+
+
 class BookmarksMode:
     name = "Bookmarks"
     panes = ("Bookmarks", "History")
@@ -183,9 +188,15 @@ class BookmarksMode:
     hint = "Enter open · Ctrl+Enter other browser · Tab other list"
     notice: str | None = None
 
-    def __init__(self, profile_dir: Path, browser: Browser = "edge") -> None:
+    def __init__(
+        self,
+        profile_dir: Path,
+        browser: Browser = "edge",
+        now: Callable[[], datetime] = datetime.now,
+    ) -> None:
         self.profile_dir = profile_dir
         self.browser = browser
+        self.now = now
         self.bookmarks: list[Link] = []
         self.history: list[Link] = []
         self.matches: list[list[Link]] = [[], []]
@@ -206,7 +217,12 @@ class BookmarksMode:
             filter_links(self.bookmarks, query),
             filter_links(self.history, query)[:HISTORY_SHOW_LIMIT],
         ]
-        return [[f"{link.name}  ({link.url})" for link in pane] for pane in self.matches]
+        bookmarks, history = self.matches
+        now = self.now()
+        return [
+            [_link_row(link) for link in bookmarks],
+            [_link_row(link, visit_label(link.visited, now)) for link in history],
+        ]
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
         if selection is not None:
