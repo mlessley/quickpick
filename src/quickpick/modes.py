@@ -24,6 +24,7 @@ from quickpick.digest import (
     read_day,
 )
 from quickpick.edge import Link, filter_links, parse_bookmarks, read_history, visit_label
+from quickpick.markup import first_url
 from quickpick.scratch import ScratchEntry, ScratchList, parse_addition
 from quickpick.store import StoreEntry, filter_entries, parse_store
 from quickpick.tags import (
@@ -95,12 +96,13 @@ class StashMode:
     name = "Stash"
     panes = ("Saved", "Scratch")
     shows_tail = False
-    hint = "Enter copy · Ctrl+Enter stash · F2 edit · Ctrl+Del remove"
+    hint = "Enter copy · Ctrl+U open link · Ctrl+Enter stash · F2 edit · Ctrl+Del remove"
     notice: str | None = None
 
-    def __init__(self, store_path: Path, scratch: ScratchList) -> None:
+    def __init__(self, store_path: Path, scratch: ScratchList, browser: Browser = "edge") -> None:
         self.store_path = store_path
         self.scratch = scratch
+        self.browser = browser
         self.entries: list[StoreEntry] = []
         self.matches: list[StoreEntry] = []
         self.scratch_matches: list[ScratchEntry] = []
@@ -135,6 +137,12 @@ class StashMode:
         name = entry.key if isinstance(entry, StoreEntry) else entry.label
         self.notice = f'Copied "{name}"' if name else "Copied"
         return None
+
+    def open_url(self, selection: Selection | None) -> bool:
+        """Ctrl+U: open the web address in the selected entry's value, instead of copying."""
+        entry = self._selected(selection)
+        opened, self.notice = _open_url(entry.value if entry else "", self.browser)
+        return opened
 
     def _selected(self, selection: Selection | None) -> StoreEntry | ScratchEntry | None:
         if selection is None:
@@ -249,10 +257,12 @@ class NotesMode:
         today: Callable[[], date] = date.today,
         open_viewer: Callable[[], None] | None = None,
         tags: ActiveTags | None = None,
+        browser: Browser = "edge",
     ) -> None:
         self.digest_dir = digest_dir
         self.today = today
         self.open_viewer = open_viewer
+        self.browser = browser
         self.tags = tags or ActiveTags()
         self.entries: list[DigestEntry] = []
         # The last week's earlier days with entries, shown greyed above today as context
@@ -261,6 +271,8 @@ class NotesMode:
         self.cleared_at: datetime | None = None
         self.clear_row: int | None = None
         self.todos: list[tuple[str, DigestEntry]] = []
+        # The entry behind each row of the log pane; None for headings and markers
+        self.log_entries: list[DigestEntry | None] = []
         # Labels already used, so the popup can flag a new one as a possible typo
         self.known_labels: list[str] = []
         # The label a `...` note written now would continue
@@ -281,11 +293,15 @@ class NotesMode:
 
     def search(self, query: str) -> list[list[Row]]:
         rows: list[Row] = []
+        self.log_entries = []
         for day, entries in self.earlier:
             rows.append(Muted(f"── {day:%A} {day.isoformat()} ──"))
+            self.log_entries.append(None)
             rows += [row if isinstance(row, Muted) else Muted(row) for row in _log_rows(entries)]
+            self.log_entries += self._shown(entries)
         if self.earlier:
             rows.append("── Today ──")
+            self.log_entries.append(None)
         cleared = (
             self.cleared_at if self.cleared_at and self.cleared_at.date() == self.today() else None
         )
@@ -294,13 +310,26 @@ class NotesMode:
             if cleared and self.clear_row is None and entry.time > cleared:
                 self.clear_row = len(rows)
                 rows.append(Muted(f"── cleared {cleared:%H:%M} · PageUp shows earlier ──"))
+                self.log_entries.append(None)
             rows.append(row)
+            self.log_entries.append(entry)
         if cleared and self.clear_row is None:
             self.clear_row = len(rows)
             rows.append(Muted(f"── cleared {cleared:%H:%M} · PageUp shows earlier ──"))
         if not self._shown(self.entries):
             rows.append(Muted(NOTES_EMPTY_HINT))
         return [[self._todo_row(todo) for _id, todo in self.todos], rows]
+
+    def open_url(self, selection: Selection | None) -> bool:
+        """Ctrl+U or a double-click: open the first web address in the selected todo or
+        log entry, whichever of its lines it's on."""
+        entry = None
+        if selection is not None:
+            pane, index = selection
+            entries = [todo for _id, todo in self.todos] if pane == 0 else self.log_entries
+            entry = entries[index] if index < len(entries) else None
+        opened, self.notice = _open_url(entry.text if entry else "", self.browser)
+        return opened
 
     @staticmethod
     def _shown(entries: list[DigestEntry]) -> list[DigestEntry]:
@@ -448,6 +477,16 @@ def _log_rows(entries: list[DigestEntry]) -> list[Row]:
             continue
         rows.append(Muted(f"⚠ {entry.text}") if entry.kind == "unreadable" else entry.display_text)
     return rows
+
+
+def _open_url(text: str, browser: Browser) -> tuple[bool, str]:
+    """Open the first web address in text: whether there was one, and what happened, for
+    the status bar."""
+    url = first_url(text)
+    if url is None:
+        return False, "No link in that line"
+    open_in_new_window(url, browser)
+    return True, f"Opened {url} in {browser.title()}"
 
 
 def _uses(count: int) -> str:

@@ -1,4 +1,4 @@
-from quickpick.markup import format_line, inline, split_code
+from quickpick.markup import first_url, format_line, inline, split_code
 
 
 def test_inline_escapes_everything_else():
@@ -78,3 +78,10 @@ def test_split_code_runs_an_unclosed_fence_to_the_end():
 
 def test_split_code_keeps_an_empty_code_block():
     assert split_code(["```", "```"]) == [("code", range(1, 1))]
+
+
+def test_first_url_finds_the_first_web_address_without_trailing_punctuation():
+    assert first_url("PR\nreview https://a.example.com/1, then https://b.example.com") == (
+        "https://a.example.com/1"
+    )
+    assert first_url("no address here") is None

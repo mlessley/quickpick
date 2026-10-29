@@ -60,6 +60,7 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
                 ("F2", "Edit store / viewer"),
                 ("Ctrl+Enter", "Other browser / stash it"),
                 ("Shift+Enter", "Write several lines"),
+                ("Ctrl+U", "Open a note's or stash link"),
                 ("Ctrl+P", "Pin open"),
                 ("Ctrl+H", "This help"),
                 ("Ctrl+Q", "Quit Quickpick"),

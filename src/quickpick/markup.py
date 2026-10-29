@@ -9,11 +9,14 @@ from typing import Literal
 FENCE = re.compile(r"\s*```")
 HEADING = re.compile(r"(#{1,3}) (.*)")
 BULLET = re.compile(r"(\s*)[-*] (.*)")
+# Only web addresses: never javascript: or file:, and never a quote, which would end the
+# browser's command-line argument
+URL = r"https?://[^\s<>\"'`]+"
 INLINE = re.compile(
     r"`(?P<code>[^`]+)`"
     r"|\*\*(?P<bold>(?!\s).+?(?<!\s))\*\*"
     r"|(?<![\w*])\*(?P<italic>(?![\s*]).+?(?<![\s*]))\*(?![\w*])"
-    r"|(?P<url>https?://[^\s<>\"'`]+)"
+    rf"|(?P<url>{URL})"
 )
 # Read as the sentence's punctuation rather than part of the address
 URL_TRAILING = ".,;:!?'\""
@@ -67,6 +70,12 @@ def inline(text: str) -> str:
             parts.append(_link(url) + escape(rest))
     parts.append(escape(text[position:]))
     return "".join(parts)
+
+
+def first_url(text: str) -> str | None:
+    """The first web address in text, without any punctuation trailing it."""
+    match = re.search(URL, text)
+    return _trim_url(match[0])[0] if match else None
 
 
 def _trim_url(url: str) -> tuple[str, str]:

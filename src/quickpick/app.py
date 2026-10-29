@@ -264,6 +264,7 @@ class Popup:
             ("l", self._on_clear),
             ("e", self._on_edit_today),
             ("f", self._on_search_key),
+            ("u", self._on_open_url),
         ):
             for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
                 self.entry.bind(sequence, handler)
@@ -634,7 +635,7 @@ class Popup:
         if self.draft_open:
             keys = "Ctrl+Enter save · Enter new line · Esc one line"
         elif isinstance(self.view, NotesMode) and self._selection() is not None:
-            keys = "Ctrl+D tick off the todo · " + keys
+            keys = "Ctrl+U open link · Ctrl+D tick off the todo · " + keys
         self.footer.config(text=f"{keys} · Ctrl+H help", fg=self.colors.muted)
 
     def _say(self, message: str) -> None:
@@ -749,7 +750,7 @@ class Popup:
             scrollbar.config(command=listbox.yview)
             listbox.config(yscrollcommand=_autohiding(scrollbar, listbox))
             listbox.pack(side="left", fill="both", expand=True)
-            listbox.bind("<Double-Button-1>", self._on_activate)
+            listbox.bind("<Double-Button-1>", self._on_double_click)
             listbox.bind("<ButtonRelease-1>", lambda _event, pane=pane: self._on_click(pane))
             self.listboxes.append(listbox)
         self.active_pane = 0
@@ -1002,6 +1003,24 @@ class Popup:
             self._after_action()
         return "break"
 
+    def _on_open_url(self, _event: object) -> str:
+        """Ctrl+U in notes or the stash: open the web address in the selected row. Closes
+        the popup, unless pinned, without clearing it, so an unsent note is kept."""
+        if not isinstance(self.view, (NotesMode, StashMode)):
+            return "break"
+        opened = self.view.open_url(self._selection())
+        self._say(self.view.notice or "")
+        self.view.notice = None
+        if opened and not self.pinned:
+            self.hide()
+        return "break"
+
+    def _on_double_click(self, event: object) -> str:
+        """A notes row has nothing to do on Enter, so a double-click opens its link."""
+        if isinstance(self.view, NotesMode):
+            return self._on_open_url(event)
+        return self._on_activate(event)
+
     def _on_remove(self, _event: object) -> str:
         """Ctrl+Delete in the stash: drop the selected scratch entry."""
         if isinstance(self.view, StashMode) and self.view.remove(self._selection()):
@@ -1140,8 +1159,14 @@ def main() -> None:
     )
     popup = Popup(
         [
-            NotesMode(DATA_DIR / "digest", open_viewer=viewer.open, tags=tags),
-            StashMode(store_path, ScratchList(scratch_path, config.stash_scratch_limit)),
+            NotesMode(
+                DATA_DIR / "digest", open_viewer=viewer.open, tags=tags, browser=config.browser
+            ),
+            StashMode(
+                store_path,
+                ScratchList(scratch_path, config.stash_scratch_limit),
+                browser=config.browser,
+            ),
             BookmarksMode(profile_dir(config.edge_profile), config.browser),
         ],
         launchers,

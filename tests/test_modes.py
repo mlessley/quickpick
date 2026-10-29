@@ -3,6 +3,7 @@ from datetime import date, datetime
 import pyperclip
 import pytest
 
+from quickpick import modes
 from quickpick.digest import DigestEntry, append_entry
 from quickpick.edge import Link
 from quickpick.modes import (
@@ -263,3 +264,80 @@ def test_history_rows_start_with_when_they_were_visited(tmp_path):
         ["Jira  (https://jira.example.com)"],
         ["09:05  Today  (https://a.example.com)", "Mon  Monday  (https://b.example.com)"],
     ]
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    urls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        modes, "open_in_new_window", lambda url, browser: urls.append((url, browser))
+    )
+    return urls
+
+
+def test_open_url_opens_the_first_address_anywhere_in_the_selected_note(tmp_path, opened):
+    monday = date(2026, 10, 12)
+    append_entry(tmp_path, note(monday, 8, "coffee"))
+    append_entry(tmp_path, note(monday, 9, "PR to review\nhttps://example.com/pr/1."))
+    mode = NotesMode(tmp_path, today=lambda: monday, browser="chrome")
+    mode.reload()
+    mode.search("")
+
+    assert mode.open_url((1, 1))
+    assert opened == [("https://example.com/pr/1", "chrome")]
+
+
+def test_open_url_opens_the_address_in_a_selected_todo(tmp_path, opened):
+    monday = date(2026, 10, 12)
+    append_entry(
+        tmp_path,
+        DigestEntry(
+            time=datetime(2026, 10, 12, 9, 0), kind="todo", text="read https://a.example.com"
+        ),
+    )
+    mode = NotesMode(tmp_path, today=lambda: monday)
+    mode.reload()
+    mode.search("")
+
+    assert mode.open_url((0, 0))
+    assert opened == [("https://a.example.com", "edge")]
+
+
+def test_open_url_says_so_when_the_row_has_no_address(tmp_path, opened):
+    monday = date(2026, 10, 12)
+    append_entry(tmp_path, note(monday, 8, "coffee"))
+    mode = NotesMode(tmp_path, today=lambda: monday)
+    mode.reload()
+    mode.search("")
+
+    assert not mode.open_url((1, 0))
+    assert not mode.open_url(None)
+    assert opened == []
+    assert mode.notice == "No link in that line"
+
+
+def test_open_url_skips_day_headings_in_the_notes_list(tmp_path, opened):
+    friday, monday = date(2026, 10, 9), date(2026, 10, 12)
+    append_entry(tmp_path, note(friday, 9, "https://friday.example.com"))
+    append_entry(tmp_path, note(monday, 8, "https://monday.example.com"))
+    mode = NotesMode(tmp_path, today=lambda: monday)
+    mode.reload()
+    mode.search("")  # Friday heading, Friday's note, Today heading, Monday's note
+
+    assert not mode.open_url((1, 0))
+    assert mode.open_url((1, 1)) and mode.open_url((1, 3))
+    assert [url for url, _browser in opened] == [
+        "https://friday.example.com",
+        "https://monday.example.com",
+    ]
+
+
+def test_open_url_in_the_stash_opens_an_address_value_instead_of_copying(
+    tmp_path, opened, clipboard
+):
+    mode = stash(tmp_path, "jira~!~https://jira.example.com\n")
+    mode.search("")
+
+    assert mode.open_url((0, 0))
+    assert opened == [("https://jira.example.com", "edge")]
+    assert clipboard == []

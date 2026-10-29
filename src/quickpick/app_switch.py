@@ -18,7 +18,7 @@ APP_KEY_MODIFIERS = {"ctrl": "Control", "alt": "Alt"}
 # Popup keys an app can't take (Ctrl+Tab / Ctrl+Enter are already unsupported app keys)
 RESERVED_APP_KEYS = {
     "ctrl+n", "ctrl+s", "ctrl+b", "ctrl+h", "ctrl+p", "ctrl+d", "ctrl+q",
-    "ctrl+l", "ctrl+e", "ctrl+f",
+    "ctrl+l", "ctrl+e", "ctrl+f", "ctrl+u",
     "ctrl+a", "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+z", "f2",
 }  # fmt: skip
 FUNCTION_KEY = re.compile(r"f([1-9]|1[0-9]|2[0-4])")
