@@ -70,10 +70,14 @@ from quickpick.toast import show_toast
 from quickpick.viewer import BackgroundViewer
 from quickpick.windows import (
     activate_window,
+    centred_in,
     foreground_window,
+    geometry_rect,
+    is_mostly_on_screen,
     is_own_window,
     window_title,
     work_area_at_cursor,
+    work_areas,
 )
 
 UI_POLL_MS = 50
@@ -319,8 +323,7 @@ class Popup:
 
     def start(self) -> None:
         """The first appearance: centred on the monitor under the mouse, on the splash."""
-        left, top, right, bottom = work_area_at_cursor()
-        x, y = (left + right - WIDTH) // 2, (top + bottom - HEIGHT) // 2
+        x, y = centred_in(work_area_at_cursor(), WIDTH, HEIGHT)
         self.root.geometry(f"{WIDTH}x{HEIGHT}+{x}+{y}")
         self.show()
         self.show_splash(animate=True)
@@ -385,12 +388,21 @@ class Popup:
             self.tag_menu.reload()
         if self.label_menu:
             self.label_menu.reload()
+        self._bring_on_screen()
         if reset and not isinstance(self.mode, NotesMode):
             self.query_var.set("")
         else:
             self._refresh_matches()
         self.root.deiconify()
         self._take_focus()
+
+    def _bring_on_screen(self) -> None:
+        """Centre the popup on the monitor under the mouse if it's mostly off screen, e.g.
+        left where a since-disconnected monitor was."""
+        left, top, right, bottom = geometry_rect(self.root.geometry())
+        if not is_mostly_on_screen((left, top, right, bottom), work_areas()):
+            x, y = centred_in(work_area_at_cursor(), right - left, bottom - top)
+            self.root.geometry(f"+{x}+{y}")
 
     def _take_focus(self) -> None:
         self.root.lift()
