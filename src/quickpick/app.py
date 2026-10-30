@@ -265,6 +265,8 @@ class Popup:
             for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
                 self.entry.bind(sequence, lambda _event, kind=mode_type: self._go_to(kind))
         self.entry.bind("<Control-Delete>", self._on_remove)
+        self.entry.bind("<Control-Up>", lambda _event: self._collapse_panes(True))
+        self.entry.bind("<Control-Down>", lambda _event: self._collapse_panes(False))
         for key, handler in (
             ("l", self._on_clear),
             ("e", self._on_edit_today),
@@ -843,6 +845,15 @@ class Popup:
                 continue
             self.listboxes[pane].config(height=min(count, FITTED_PANE_ROWS))
             frame.pack(fill="x", before=log_top)
+
+    def _collapse_panes(self, collapse: bool) -> str:
+        """Ctrl+Up / Ctrl+Down in a log view: collapse or expand the panes above the log,
+        e.g. the open todos."""
+        if self.view.shows_tail:
+            above = set(self.view.panes[:-1])
+            self.collapsed = self.collapsed | above if collapse else self.collapsed - above
+            self._refresh_matches()
+        return "break"
 
     def _toggle_pane(self, title: str) -> None:
         """A click on the heading of a pane above the log collapses it or expands it."""

@@ -20,9 +20,15 @@ def test_keys_are_shown_the_way_they_are_pressed():
 def test_hotkey_list_comes_from_the_config_and_the_launchers():
     config = Config(
         summon_hotkey="ctrl+shift+q",
-        apps=[AppShortcut(key="ctrl+k", name="Paint", program="mspaint.exe")],
+        apps=[
+            AppShortcut(key="ctrl+k", name="Paint", program="mspaint.exe"),
+            AppShortcut(key="alt+1", name="Notepad", program="notepad.exe"),
+        ],
     )
-    launchers = [StoreLauncher("g", "Repo shortcuts", Path("unused.txt"))]
+    launchers = [
+        StoreLauncher("g", "Repo shortcuts", Path("unused.txt")),
+        StoreLauncher("w", "Wiki", Path("unused.txt")),
+    ]
 
     groups = dict(hotkey_groups(config, launchers))
 
@@ -31,12 +37,13 @@ def test_hotkey_list_comes_from_the_config_and_the_launchers():
         "In the popup",
         "In notes",
         "Apps",
-        "Commands · / lists them",
+        "Commands",
     ]
     assert groups["Anywhere"][0] == ("Ctrl+Shift+Q", "Show or hide the popup")
     assert ("Ctrl+H", "This help") in groups["In the popup"]
-    assert groups["Apps"] == [("Ctrl+K", "Paint")]
-    assert groups["Commands · / lists them"] == [("/g", "Repo shortcuts")]
+    # One row each, so the splash doesn't outgrow the popup as apps and searches are added
+    assert groups["Apps"] == [("Ctrl+K / Alt+1", "Paint / Notepad")]
+    assert groups["Commands"] == [("/g /w", "Type / to list them")]
 
 
 def test_apps_group_is_left_out_when_none_are_configured():

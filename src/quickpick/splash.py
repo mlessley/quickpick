@@ -71,7 +71,8 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
             [
                 ("[] text", "Add a todo"),
                 ("Ctrl+D", "Tick off a todo"),
-                ("Ctrl+I", "Add the PNG just downloaded"),
+                ("Ctrl+Up / Down", "Hide / show the todos"),
+                ("Ctrl+I", "Add a downloaded PNG"),
                 ("#tag", "Tag on / off"),
                 ("name: text", "Label a line"),
                 (": / ...", "List / continue labels"),
@@ -79,10 +80,13 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
             ],
         ),
     ]
+    # Apps and commands get a row each, however many are configured, so the splash still
+    # fits the popup; the `/` menu describes each command
     if config.apps:
-        groups.append(("Apps", [(format_key(app.key), app.name) for app in config.apps]))
-    commands = [tuple(launcher.name.split(" ", 1)) for launcher in launchers]
-    groups.append(("Commands · / lists them", commands))
+        keys = " / ".join(format_key(app.key) for app in config.apps)
+        groups.append(("Apps", [(keys, " / ".join(app.name for app in config.apps))]))
+    commands = " ".join(f"/{launcher.command}" for launcher in launchers)
+    groups.append(("Commands", [(commands, "Type / to list them")]))
     return groups
 
 
