@@ -154,6 +154,9 @@ class Popup:
         self.match_counts: list[int] = []
         self.active_pane = 0
         self.panes_built_for: Mode | None = None
+        # Titles of the panes above a log (e.g. "Open todos") collapsed to their heading by
+        # a click on it; kept until Quickpick restarts
+        self.collapsed: set[str] = set()
         # The window the user was in before summoning, to return focus to on hide
         self.previous_window = 0
         # Pointer position within the window when a drag of the mode bar started
@@ -742,6 +745,9 @@ class Popup:
             if titled:
                 label = tk.Label(self.panes_frame, text=title, anchor="w", font=BOLD_FONT)
                 label.pack(fill="x")
+                if self.view.shows_tail and pane < len(self.view.panes) - 1:
+                    label.config(cursor="hand2")
+                    label.bind("<ButtonRelease-1>", lambda _event, t=title: self._toggle_pane(t))
             frame = tk.Frame(self.panes_frame)
             frame.pack(fill="both", expand=True)
             self.pane_widgets.append((label, frame))
@@ -824,10 +830,22 @@ class Popup:
                     widget.pack_forget()
             if not count:
                 continue
-            self.listboxes[pane].config(height=min(count, FITTED_PANE_ROWS))
+            title = self.view.panes[pane]
+            collapsed = title in self.collapsed
             if label is not None:
+                label.config(text=f"{'▸' if collapsed else '▾'} {title} ({count})")
                 label.pack(fill="x", before=log_top)
+            if collapsed:
+                self.listboxes[pane].selection_clear(0, tk.END)
+                continue
+            self.listboxes[pane].config(height=min(count, FITTED_PANE_ROWS))
             frame.pack(fill="x", before=log_top)
+
+    def _toggle_pane(self, title: str) -> None:
+        """A click on the heading of a pane above the log collapses it or expands it."""
+        self.collapsed ^= {title}
+        self._refresh_matches()
+        self.entry.focus_set()
 
     def _select(self, pane: int, index: int) -> None:
         for listbox in self.listboxes:
@@ -870,7 +888,11 @@ class Popup:
         self._select(self.active_pane, max(0, min(index, count - 1)))
 
     def _has_rows_above_log(self) -> bool:
-        return any(self.match_counts[:-1])
+        """Rows to pick from above the log: in a pane that isn't collapsed."""
+        return any(
+            count and title not in self.collapsed
+            for title, count in zip(self.view.panes[:-1], self.match_counts[:-1], strict=True)
+        )
 
     def _scroll_log_to_newest(self) -> None:
         """Show the end of the log; after Ctrl+L, with the cleared marker at the top while
