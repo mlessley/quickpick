@@ -96,6 +96,13 @@ Data lives in `~/.quickpick-data/`:
       {"key": "ctrl+t", "name": "Teams", "program": "ms-teams.exe"}
     ]
     ```
+  - `searches`: your own web-search commands, none by default. Each is `{"command": ..., "name": ..., "url": ...}`, where `url` has `{query}` where the typed text goes; `/p jane doe` then opens it with `jane%20doe` in that place (**Ctrl+Enter** for the other browser). Commands are letters or digits, and `g`, `j` and `t` are taken. For example:
+    ```json
+    "searches": [
+      {"command": "p", "name": "People", "url": "https://people.example.com/search?query={query}"},
+      {"command": "d", "name": "Dictionary", "url": "https://www.merriam-webster.com/dictionary/{query}"}
+    ]
+    ```
 
 ### Editing the digest by hand
 

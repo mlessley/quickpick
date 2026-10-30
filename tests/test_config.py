@@ -67,3 +67,45 @@ def test_theme_defaults_to_dark_and_rejects_unknown_themes(tmp_path):
     path.write_text('{"theme": "purple"}')
     with pytest.raises(ValidationError):
         load_config(path)
+
+
+def _searches(tmp_path, searches: str):
+    path = tmp_path / "config.json"
+    path.write_text(f'{{"searches": {searches}}}')
+    return load_config(path).searches
+
+
+def test_no_web_searches_by_default(tmp_path):
+    assert load_config(tmp_path / "config.json").searches == []
+
+
+def test_web_searches_are_read_with_lowercase_commands(tmp_path):
+    [people] = _searches(
+        tmp_path, '[{"command": "P", "name": "People", "url": "https://x.test/?q={query}"}]'
+    )
+
+    assert (people.command, people.name, people.url) == ("p", "People", "https://x.test/?q={query}")
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        '{"command": "p", "name": "People", "url": "https://x.test/"}',
+        '{"command": "g", "name": "Clash", "url": "https://x.test/?q={query}"}',
+        '{"command": "p q", "name": "Space", "url": "https://x.test/?q={query}"}',
+        '{"command": "/p", "name": "Slash", "url": "https://x.test/?q={query}"}',
+        '{"command": "p", "name": "Script", "url": "javascript:alert({query})"}',
+    ],
+)
+def test_rejects_a_web_search_without_a_query_slot_or_with_a_bad_command(tmp_path, search):
+    with pytest.raises(ValidationError):
+        _searches(tmp_path, f"[{search}]")
+
+
+def test_rejects_two_web_searches_with_the_same_command(tmp_path):
+    with pytest.raises(ValidationError, match="w"):
+        _searches(
+            tmp_path,
+            '[{"command": "w", "name": "A", "url": "https://a.test/?q={query}"},'
+            ' {"command": "W", "name": "B", "url": "https://b.test/?q={query}"}]',
+        )

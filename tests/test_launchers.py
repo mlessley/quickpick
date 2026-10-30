@@ -1,6 +1,15 @@
 import pytest
 
-from quickpick.launchers import CommandMenu, StoreLauncher, command_text, jira_target, route
+from quickpick import launchers
+from quickpick.launchers import (
+    CommandMenu,
+    SearchLauncher,
+    StoreLauncher,
+    command_text,
+    jira_target,
+    route,
+)
+from quickpick.modes import Muted
 
 
 @pytest.fixture
@@ -77,3 +86,52 @@ BASE = "https://example.atlassian.net"
 )
 def test_jira_target_resolves_digits_keys_and_text(rest, expected):
     assert jira_target(rest, BASE + "/", "PROJ") == expected
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    urls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        launchers, "open_in_new_window", lambda url, browser: urls.append((url, browser))
+    )
+    return urls
+
+
+def people() -> SearchLauncher:
+    return SearchLauncher("p", "People", "https://people.example.com/search?query={query}")
+
+
+def test_web_search_offers_to_search_for_what_is_typed():
+    launcher = people()
+
+    assert launcher.name == "/p People"
+    assert launcher.search("jane doe") == [['Search People for "jane doe"']]
+
+
+def test_web_search_with_nothing_typed_says_what_to_type(opened):
+    launcher = people()
+
+    [[hint]] = launcher.search("  ")
+    launcher.activate("  ", (0, 0), alternate=False)
+
+    assert isinstance(hint, Muted)
+    assert opened == []
+
+
+def test_web_search_puts_the_query_into_the_url_encoded(opened):
+    launcher = people()
+    launcher.search("jane doe & co/x")
+
+    launcher.activate("jane doe & co/x", (0, 0), alternate=False)
+
+    assert opened == [("https://people.example.com/search?query=jane%20doe%20%26%20co%2Fx", "edge")]
+    assert launcher.notice == 'Searched People for "jane doe & co/x" in Edge'
+
+
+def test_web_search_alternate_uses_the_other_browser(opened):
+    launcher = people()
+    launcher.search("x")
+
+    launcher.activate("x", (0, 0), alternate=True)
+
+    assert opened[0][1] == "chrome"

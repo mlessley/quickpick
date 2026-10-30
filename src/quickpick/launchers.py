@@ -8,7 +8,7 @@ from typing import Protocol
 from urllib.parse import quote
 
 from quickpick.browser import Browser, choose_browser, open_in_new_window
-from quickpick.modes import Mode, Selection
+from quickpick.modes import Mode, Muted, Row, Selection
 from quickpick.store import StoreEntry, filter_entries, parse_store
 
 
@@ -83,6 +83,43 @@ class StoreLauncher:
     def edit(self) -> bool:
         subprocess.Popen(["notepad.exe", str(self.store_path)])
         return True
+
+
+class SearchLauncher:
+    """A web search from the config (`/p jane`): opens its URL with the text in place of
+    {query}."""
+
+    panes = ("",)
+    shows_tail = False
+    hint = "Enter search · Ctrl+Enter other browser"
+    notice: str | None = None
+
+    def __init__(self, command: str, title: str, url: str, browser: Browser = "edge") -> None:
+        self.command = command
+        self.name = f"/{command} {title}"
+        self.title = title
+        self.url = url
+        self.browser = browser
+
+    def reload(self) -> None:
+        pass
+
+    def search(self, query: str) -> list[list[Row]]:
+        text = query.strip()
+        if not text:
+            return [[Muted(f"Type what to search {self.title} for")]]
+        return [[f'Search {self.title} for "{text}"']]
+
+    def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
+        text = query.strip()
+        if selection is None or not text:
+            return
+        browser = choose_browser(self.browser, alternate)
+        open_in_new_window(self.url.replace("{query}", quote(text, safe="")), browser)
+        self.notice = f'Searched {self.title} for "{text}" in {browser.title()}'
+
+    def edit(self) -> bool:
+        return False
 
 
 class CommandMenu:

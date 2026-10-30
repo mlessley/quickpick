@@ -34,6 +34,38 @@ class AppShortcut(BaseModel):
         return key
 
 
+# Commands Quickpick defines itself: /g repo shortcuts, /j Jira, /t focus timer
+BUILT_IN_COMMANDS = {"g", "j", "t"}
+QUERY_SLOT = "{query}"
+
+
+class WebSearch(BaseModel):
+    """A `/command` that opens a web page searching for what's typed after it."""
+
+    command: str
+    name: str
+    url: str  # a web address with {query} where the typed text goes
+
+    @field_validator("command")
+    @classmethod
+    def _check_command(cls, command: str) -> str:
+        command = command.lower()
+        if not command or not all(char.isalnum() for char in command):
+            raise ValueError(f"search command {command!r}: letters and digits only, no slash")
+        if command in BUILT_IN_COMMANDS:
+            raise ValueError(f"search command {command!r} is already used by Quickpick")
+        return command
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, url: str) -> str:
+        if QUERY_SLOT not in url:
+            raise ValueError(f"search url {url!r} needs {QUERY_SLOT} where the text goes")
+        if not url.lower().startswith(("https://", "http://")):
+            raise ValueError(f"search url {url!r} must be a web address")
+        return url
+
+
 DEFAULT_APPS = [
     AppShortcut(key="ctrl+o", name="Outlook", program="OUTLOOK.EXE"),
     AppShortcut(key="ctrl+t", name="Teams", program="ms-teams.exe"),
@@ -57,6 +89,17 @@ class Config(BaseModel):
     # Newest entries the stash's scratch list keeps; older ones drop off
     stash_scratch_limit: int = Field(default=100, ge=1)
     apps: list[AppShortcut] = Field(default_factory=lambda: list(DEFAULT_APPS))
+    # Your own `/command`s searching a site, e.g. a people directory; none by default
+    searches: list[WebSearch] = Field(default_factory=list)
+
+    @field_validator("searches")
+    @classmethod
+    def _check_unique_search_commands(cls, searches: list[WebSearch]) -> list[WebSearch]:
+        commands = [search.command for search in searches]
+        duplicates = sorted({command for command in commands if commands.count(command) > 1})
+        if duplicates:
+            raise ValueError(f"more than one search uses /{', /'.join(duplicates)}")
+        return searches
 
     @field_validator("apps")
     @classmethod

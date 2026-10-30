@@ -25,6 +25,7 @@ from quickpick.launchers import (
     CommandMenu,
     JiraLauncher,
     Launcher,
+    SearchLauncher,
     StoreLauncher,
     command_text,
     route,
@@ -1174,6 +1175,10 @@ def main() -> None:
         StoreLauncher("g", "Repo shortcuts", DATA_DIR / "launcher.txt", config.browser),
         JiraLauncher("j", config.jira_base_url, config.jira_default_project, config.browser),
         TimerLauncher(timer),
+        *(
+            SearchLauncher(search.command, search.name, search.url, config.browser)
+            for search in config.searches
+        ),
     ]
     splash = SplashContent(
         hotkey_groups(config, launchers),

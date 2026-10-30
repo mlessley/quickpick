@@ -37,7 +37,7 @@ A query starting with `/` and a command name (`/g home`, `/j 123`, `/t 25 write 
 _Avoid_: Prefix, special launcher, colon form (the retired `g:home` / `:g:home` forms); omnibox — considered and rejected as a broader idea; a command is an explicit name, not general intent inference.
 
 **Launcher**:
-What a command hands its query to: repo shortcuts (`/g`), Jira (`/j`) or the focus timer (`/t`).
+What a command hands its query to: repo shortcuts (`/g`), Jira (`/j`), the focus timer (`/t`), or a **web search** from the config (e.g. `/p jane` searching a people directory), which opens a configured URL with the typed text in it.
 
 **Command menu**:
 The list of commands, each with a short description, shown while a command is being typed (`/`, `/re`) and something in it matches. Choosing one fills it in (`/g `).
