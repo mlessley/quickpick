@@ -39,7 +39,19 @@ def test_configured_apps_replace_the_defaults(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "key", ["ctrl+n", "ctrl+h", "ctrl+p", "ctrl+d", "ctrl+q", "Ctrl+V", "f2", "ctrl+bogus"]
+    "key",
+    [
+        "ctrl+1",
+        "ctrl+m",
+        "ctrl+n",
+        "ctrl+h",
+        "ctrl+p",
+        "ctrl+d",
+        "ctrl+q",
+        "Ctrl+V",
+        "f2",
+        "ctrl+bogus",
+    ],
 )
 def test_rejects_app_keys_the_popup_already_uses_or_cannot_bind(tmp_path, key):
     path = tmp_path / "config.json"

@@ -83,14 +83,17 @@ from quickpick.timer import FocusTimer, TimerLauncher
 from quickpick.toast import show_toast
 from quickpick.viewer import BackgroundViewer
 from quickpick.windows import (
+    Placement,
     activate_window,
     centred_in,
     foreground_window,
     geometry_rect,
     is_mostly_on_screen,
     is_own_window,
+    placed_in,
     window_title,
     work_area_at_cursor,
+    work_area_of,
     work_areas,
 )
 
@@ -129,6 +132,14 @@ SPLASH_KEEP_KEYS = {
     "Win_L", "Win_R", "Caps_Lock", "Escape",
 }  # fmt: skip
 CONTROL_MASK = 0x4
+# Popup keys that move it within its monitor, clockwise from the top left
+PLACEMENT_KEYS: dict[str, Placement] = {
+    "ctrl+1": "top-left",
+    "ctrl+2": "top-right",
+    "ctrl+3": "bottom-right",
+    "ctrl+4": "bottom-left",
+    "ctrl+m": "center",
+}
 # Keys that scroll the splash rather than leave it: (rows or pages, how far)
 SPLASH_SCROLL_KEYS = {"Up": (False, -1), "Down": (False, 1), "Prior": (True, -1), "Next": (True, 1)}
 
@@ -284,6 +295,9 @@ class Popup:
         self.entry.bind("<Control-Up>", lambda _event: self._collapse_panes(True))
         self.entry.bind("<Control-Down>", lambda _event: self._collapse_panes(False))
         self.entry.bind("<Control-comma>", self._on_open_config)
+        for key, where in PLACEMENT_KEYS.items():
+            for sequence in app_key_sequences(key):
+                self.entry.bind(sequence, lambda _event, where=where: self._place(where))
         self.entry.bind("<Control-r>", self._on_restart)
         self.entry.bind("<Control-R>", self._on_restart)  # with Caps Lock on
         # Set by Ctrl+R: main starts Quickpick again once this one has closed
@@ -452,6 +466,14 @@ class Popup:
             self._refresh_matches()
         self.root.deiconify()
         self._take_focus()
+
+    def _place(self, where: Placement) -> str:
+        """Ctrl+1-4 / Ctrl+M: move the popup to a corner of its monitor, or the middle."""
+        left, top, right, bottom = geometry_rect(self.root.geometry())
+        area = work_area_of((left, top, right, bottom))
+        x, y = placed_in(area, right - left, bottom - top, where)
+        self.root.geometry(f"+{x}+{y}")
+        return "break"
 
     def _bring_on_screen(self) -> None:
         """Centre the popup on the monitor under the mouse if it's mostly off screen, e.g.

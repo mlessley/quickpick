@@ -62,6 +62,7 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
                 ("Ctrl+N / S / B", "Notes / Stash / Bookmarks"),
                 ("Shift+Enter", "Write several lines"),
                 ("Ctrl+P", "Pin open"),
+                ("Ctrl+1-4 / M", "Move to a corner / the middle"),
                 ("Ctrl+H", "This help"),
                 ("Ctrl+Q", "Quit Quickpick"),
             ],

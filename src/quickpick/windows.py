@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Literal
 
 import pywintypes
 import win32api
@@ -80,3 +81,25 @@ def geometry_rect(geometry: str) -> Rect:
         raise ValueError(f"not a Tk geometry: {geometry!r}")
     width, height, x, y = map(int, match.groups())
     return x, y, x + width, y + height
+
+
+Placement = Literal["top-left", "top-right", "bottom-right", "bottom-left", "center"]
+# Space kept between a window placed in a corner and the edges of the work area
+EDGE_GAP = 12
+
+
+def placed_in(area: Rect, width: int, height: int, where: Placement) -> tuple[int, int]:
+    """The top-left corner that puts a width x height window in a corner of area, a little
+    in from its edges, or in its middle."""
+    if where == "center":
+        return centred_in(area, width, height)
+    left, top, right, bottom = area
+    x = left + EDGE_GAP if where.endswith("left") else right - EDGE_GAP - width
+    y = top + EDGE_GAP if where.startswith("top") else bottom - EDGE_GAP - height
+    return x, y
+
+
+def work_area_of(window: Rect) -> Rect:
+    """The work area of the monitor window is mostly on (the nearest, if it's on none)."""
+    monitor = win32api.MonitorFromRect(window, win32con.MONITOR_DEFAULTTONEAREST)
+    return win32api.GetMonitorInfo(monitor)["Work"]
