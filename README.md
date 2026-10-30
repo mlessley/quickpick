@@ -26,7 +26,7 @@ uv sync
 uv run quickpick
 ```
 
-Quickpick stays running in that console. At startup the popup opens centred on the screen with the mouse, on a splash showing today's digest so far and every hotkey (generated from your config). Typing, or any popup key, goes straight on from the splash; **Ctrl+H** brings it back at any time. Press **Ctrl+Alt+Space** from any window to open the popup and again to close it; **Ctrl+C** in the console, or **Ctrl+Q** twice in the popup, quits.
+Quickpick stays running in that console. At startup the popup opens centred on the screen with the mouse, on a splash showing today's digest so far and every hotkey (generated from your config). Up/Down, PageUp/PageDown and the mouse wheel scroll it, section by section (anywhere, the popup, each mode, commands, apps, settings); typing, or any other popup key, goes straight on from the splash; **Ctrl+H** brings it back at any time. Press **Ctrl+Alt+Space** from any window to open the popup and again to close it; **Ctrl+C** in the console, or **Ctrl+Q** twice in the popup, quits.
 
 **Without a console:** `uv run quickpick-shortcuts` adds Quickpick to the Start menu and starts it whenever you sign in to Windows (`uv run quickpick-shortcuts --remove` takes both away). The shortcuts run `uvw run --project <this folder> quickpick-gui`, so Quickpick runs from this checkout with no console window, and uv keeps its packages in sync on each start. Quit it with **Ctrl+Q** twice in the popup. Anything that stops it starting (a bad `config.json`, a hotkey that's already taken, e.g. by a copy already running) is shown in a message box, and its output goes to `~/.quickpick-data/quickpick.log`.
 
@@ -78,7 +78,7 @@ Data lives in `~/.quickpick-data/`:
 - `launcher.txt`: the `g:` launcher store, one `key~!~url` entry per line (e.g. `quickpick~!~https://github.com/mlessley/quickpick`).
 - `digest/YYYY-MM-DD.jsonl`: one file per day of notes and screenshots, one JSON entry per line. Screenshot entries store the image's full path, so if you move images, update those paths too.
 - `screenshots/`: a suggested home for GreenShot's captures. Set it as GreenShot's storage location (Preferences, Output); Quickpick follows whatever folder GreenShot uses.
-- `config.json` (optional):
+- `config.json` (optional): **Ctrl+,** in the popup opens it in Notepad, first creating it with sample entries if there isn't one. It's read at startup, so restart Quickpick (**Ctrl+Q** twice) after changing it.
   - `summon_hotkey`: e.g. `"ctrl+shift+q"`. Modifiers are `ctrl`, `alt`, `shift`, `win`. Default `"ctrl+alt+space"`.
   - `screenshot_hotkey`: default `"ctrl+alt+s"`.
   - `greenshot_hotkey` / `screenshot_dir`: override the capture hotkey and save folder otherwise read from GreenShot's settings.

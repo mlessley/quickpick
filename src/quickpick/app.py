@@ -1,4 +1,5 @@
 import queue
+import subprocess
 import sys
 import time
 import tkinter as tk
@@ -10,7 +11,7 @@ from tkinter import ttk
 from pydantic import ValidationError
 
 from quickpick.app_switch import app_key_sequences, bring_to_front, list_windows, pick_window
-from quickpick.config import CONFIG_PATH, DATA_DIR, AppShortcut, load_config
+from quickpick.config import CONFIG_PATH, DATA_DIR, AppShortcut, ensure_config, load_config
 from quickpick.digest import (
     CONTINUATION,
     DigestEntry,
@@ -117,6 +118,8 @@ SPLASH_KEEP_KEYS = {
     "Win_L", "Win_R", "Caps_Lock", "Escape",
 }  # fmt: skip
 CONTROL_MASK = 0x4
+# Keys that scroll the splash rather than leave it: (rows or pages, how far)
+SPLASH_SCROLL_KEYS = {"Up": (False, -1), "Down": (False, 1), "Prior": (True, -1), "Next": (True, 1)}
 
 UiCall = Callable[[], None]
 
@@ -267,6 +270,7 @@ class Popup:
         self.entry.bind("<Control-Delete>", self._on_remove)
         self.entry.bind("<Control-Up>", lambda _event: self._collapse_panes(True))
         self.entry.bind("<Control-Down>", lambda _event: self._collapse_panes(False))
+        self.entry.bind("<Control-comma>", self._on_open_config)
         for key, handler in (
             ("l", self._on_clear),
             ("e", self._on_edit_today),
@@ -363,17 +367,32 @@ class Popup:
             self.show_splash()
         return "break"
 
-    def _before_key(self, event: tk.Event) -> None:
+    def _before_key(self, event: tk.Event) -> str | None:
         """Ahead of every key's own handling: any key but Ctrl+Q takes back a pending quit,
-        and any key but Ctrl+H (or a lone modifier, or Esc) leaves the splash."""
+        the arrows and PageUp/Down scroll the splash, and any other key but Ctrl+H (or a
+        lone modifier, or Esc) leaves it."""
         if event.keysym in SPLASH_KEEP_KEYS:
-            return
+            return None
         control = event.state & CONTROL_MASK
         if self.quit_armed and not (control and event.keysym.lower() == "q"):
             self.quit_armed = False
             self._update_mode_bar()
+        scroll = SPLASH_SCROLL_KEYS.get(event.keysym)
+        if self.splash_shown and self.splash and scroll and not control:
+            pages, delta = scroll
+            self.splash.scroll(delta, pages)
+            return "break"
         if self.splash_shown and not (control and event.keysym.lower() == "h"):
             self.hide_splash()
+        return None
+
+    def _on_open_config(self, _event: object) -> str:
+        """Ctrl+,: the config in Notepad, created from a sample if there's none yet. It's
+        read at startup, so changes need a restart."""
+        ensure_config(CONFIG_PATH)
+        subprocess.Popen(["notepad.exe", str(CONFIG_PATH)])
+        self._say("Opened config.json · restart Quickpick to apply (Ctrl+Q twice)")
+        return "break"
 
     def _on_quit_key(self, _event: object) -> str:
         """Ctrl+Q asks first, in the mode bar; a second Ctrl+Q ends Quickpick."""

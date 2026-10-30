@@ -35,15 +35,19 @@ def test_hotkey_list_comes_from_the_config_and_the_launchers():
     assert list(groups) == [
         "Anywhere",
         "In the popup",
-        "In notes",
-        "Apps",
+        "Notes",
+        "Stash",
+        "Bookmarks",
         "Commands",
+        "Apps",
+        "Settings",
     ]
     assert groups["Anywhere"][0] == ("Ctrl+Shift+Q", "Show or hide the popup")
     assert ("Ctrl+H", "This help") in groups["In the popup"]
-    # One row each, so the splash doesn't outgrow the popup as apps and searches are added
-    assert groups["Apps"] == [("Ctrl+K / Alt+1", "Paint / Notepad")]
-    assert groups["Commands"] == [("/g /w", "Type / to list them")]
+    # The help scrolls, so each app and command gets its own row again
+    assert groups["Apps"] == [("Ctrl+K", "Paint"), ("Alt+1", "Notepad")]
+    assert groups["Commands"] == [("/g", "Repo shortcuts"), ("/w", "Wiki")]
+    assert groups["Settings"][0] == ("Ctrl+,", "Open config.json (restart to apply)")
 
 
 def test_apps_group_is_left_out_when_none_are_configured():

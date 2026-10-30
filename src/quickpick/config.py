@@ -124,6 +124,26 @@ class Config(BaseModel):
         return spec
 
 
+# Written by Ctrl+, when there's no config yet: placeholders that show the shape
+SAMPLE_CONFIG = """{
+  "jira_base_url": "https://your-company.atlassian.net",
+  "jira_default_project": "PROJ",
+  "searches": [
+    {"command": "w", "name": "Wiki", "url": "https://wiki.example.com/search?q={query}"},
+    {"command": "d", "name": "Directory", "url": "https://directory.example.com/find?query={query}"},
+    {"command": "m", "name": "Maps", "url": "https://maps.example.com/?search={query}"}
+  ]
+}
+"""
+
+
+def ensure_config(path: Path) -> None:
+    """Create the config from SAMPLE_CONFIG if there isn't one yet, to edit by hand."""
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(SAMPLE_CONFIG, encoding="utf-8")
+
+
 def load_config(path: Path) -> Config:
     if not path.exists():
         return Config()

@@ -4,9 +4,10 @@ import time
 import tkinter as tk
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from tkinter import font as tkfont
 
-from quickpick.config import Config
+from quickpick.config import DATA_DIR, Config
 from quickpick.digest import DigestEntry
 from quickpick.launchers import Launcher
 from quickpick.theme import Palette
@@ -23,6 +24,9 @@ PAD = 20
 ROW = 18
 # Space between one group of keys and the next
 GROUP_GAP = 6
+# A mouse wheel notch is 120; scroll three rows a notch, like a list
+WHEEL_DELTA = 40
+MORE_HINT = "more-hint"
 
 # (key as pressed, what it does)
 Hotkey = tuple[str, str]
@@ -55,38 +59,70 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
             "In the popup",
             [
                 ("Ctrl+Tab", "Next mode"),
-                ("Ctrl+N", "Notes, then the viewer"),
-                ("Ctrl+S / B", "Stash / Bookmarks"),
-                ("F2", "Edit store / viewer"),
-                ("Ctrl+Enter", "Other browser / stash it"),
+                ("Ctrl+N / S / B", "Notes / Stash / Bookmarks"),
                 ("Shift+Enter", "Write several lines"),
-                ("Ctrl+U", "Open a note's or stash link"),
                 ("Ctrl+P", "Pin open"),
                 ("Ctrl+H", "This help"),
                 ("Ctrl+Q", "Quit Quickpick"),
             ],
         ),
         (
-            "In notes",
+            "Notes",
             [
+                ("Enter", "Save the note"),
                 ("[] text", "Add a todo"),
                 ("Ctrl+D", "Tick off a todo"),
                 ("Ctrl+Up / Down", "Hide / show the todos"),
-                ("Ctrl+I", "Add a downloaded PNG"),
                 ("#tag", "Tag on / off"),
                 ("name: text", "Label a line"),
                 (": / ...", "List / continue labels"),
-                ("Ctrl+F / L / E", "Search / clear / edit file"),
+                ("Ctrl+U", "Open the link in a note"),
+                ("Ctrl+I", "Add a downloaded PNG"),
+                ("Ctrl+F", "Search every day's notes"),
+                ("Ctrl+L", "Clear the list"),
+                ("Ctrl+E", "Edit today's file"),
+                ("F2", "Open the viewer"),
+            ],
+        ),
+        (
+            "Stash",
+            [
+                ("Enter", "Copy"),
+                ("Ctrl+Enter", "Add to the scratch list"),
+                ("Ctrl+U", "Open it, if it's a link"),
+                ("Ctrl+Delete", "Remove a scratch entry"),
+                ("F2", "Edit the file"),
+            ],
+        ),
+        (
+            "Bookmarks",
+            [
+                ("Enter", "Open in a new window"),
+                ("Ctrl+Enter", "Open in the other browser"),
+                ("Tab", "Bookmarks / history"),
+            ],
+        ),
+        (
+            "Commands",
+            [
+                (command, description)
+                for command, _, description in (
+                    launcher.name.partition(" ") for launcher in launchers
+                )
             ],
         ),
     ]
-    # Apps and commands get a row each, however many are configured, so the splash still
-    # fits the popup; the `/` menu describes each command
     if config.apps:
-        keys = " / ".join(format_key(app.key) for app in config.apps)
-        groups.append(("Apps", [(keys, " / ".join(app.name for app in config.apps))]))
-    commands = " ".join(f"/{launcher.command}" for launcher in launchers)
-    groups.append(("Commands", [(commands, "Type / to list them")]))
+        groups.append(("Apps", [(format_key(app.key), app.name) for app in config.apps]))
+    groups.append(
+        (
+            "Settings",
+            [
+                ("Ctrl+,", "Open config.json (restart to apply)"),
+                ("Files", str(Path("~") / DATA_DIR.relative_to(Path.home()))),
+            ],
+        )
+    )
     return groups
 
 
@@ -140,7 +176,12 @@ class SplashView:
     def __init__(self, parent: tk.Misc, colors: Palette, content: SplashContent) -> None:
         self.colors = colors
         self.content = content
-        self.canvas = tk.Canvas(parent, background=colors.field, highlightthickness=0)
+        # Scrolls a row at a time, by the arrow keys (from the popup) or the mouse wheel
+        self.canvas = tk.Canvas(
+            parent, background=colors.field, highlightthickness=0, yscrollincrement=ROW
+        )
+        self.canvas.bind("<MouseWheel>", lambda event: self.scroll(-event.delta // WHEEL_DELTA))
+        self.canvas.bind("<Configure>", lambda _event: self._place_more_hint())
         self.title_font = tkfont.Font(family="Segoe UI", size=24, weight="bold")
         self.header_font = tkfont.Font(family="Segoe UI", size=9, weight="bold")
         self.key_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
@@ -173,14 +214,39 @@ class SplashView:
                 PAD, y, text=line, anchor="nw", font=self.text_font, fill=colors.text
             )
             y += ROW
-        top = y + 12
-        groups = self.content.groups
-        self._draw_column(groups[:2], PAD, top)
-        self._draw_column(groups[2:], 310, top)
+        bottom = self._draw_column(self.content.groups, PAD, y + 12)
+        canvas.configure(scrollregion=(0, 0, 0, bottom + PAD))
+        canvas.yview_moveto(0)
+        canvas.create_text(
+            0,
+            0,
+            text="scroll for more ↓",
+            anchor="se",
+            font=self.text_font,
+            fill=colors.muted,
+            tags=MORE_HINT,
+        )
+        self._place_more_hint()
         if animate:
             self._animate(time.monotonic())
 
-    def _draw_column(self, groups: list[HotkeyGroup], x: int, y: int) -> None:
+    def scroll(self, rows: int, pages: bool = False) -> None:
+        """Scroll the keys by rows, or by that many screens."""
+        self.canvas.yview_scroll(rows, "pages" if pages else "units")
+        self._place_more_hint()
+
+    def _place_more_hint(self) -> None:
+        """Keep "scroll for more" at the bottom right of the view while there is more."""
+        canvas = self.canvas
+        at_end = canvas.yview()[1] >= 1
+        canvas.itemconfigure(MORE_HINT, state="hidden" if at_end else "normal")
+        canvas.coords(
+            MORE_HINT, canvas.winfo_width() - PAD, canvas.canvasy(canvas.winfo_height()) - 6
+        )
+        canvas.tag_raise(MORE_HINT)
+
+    def _draw_column(self, groups: list[HotkeyGroup], x: int, y: int) -> int:
+        """Draw groups of keys from y down; where they end."""
         canvas, colors = self.canvas, self.colors
         keys = [key for _title, hotkeys in groups for key, _action in hotkeys]
         action_x = x + max((self.key_font.measure(key) for key in keys), default=0) + 14
@@ -198,6 +264,7 @@ class SplashView:
                 )
                 y += ROW
             y += GROUP_GAP
+        return y
 
     def _animate(self, started: float) -> None:
         elapsed_ms = (time.monotonic() - started) * 1000

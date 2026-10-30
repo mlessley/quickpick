@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from quickpick.config import load_config
+from quickpick.config import ensure_config, load_config
 
 
 def test_missing_file_uses_default_summon_hotkey(tmp_path):
@@ -109,3 +109,21 @@ def test_rejects_two_web_searches_with_the_same_command(tmp_path):
             '[{"command": "w", "name": "A", "url": "https://a.test/?q={query}"},'
             ' {"command": "W", "name": "B", "url": "https://b.test/?q={query}"}]',
         )
+
+
+def test_ensure_config_writes_a_working_sample_when_there_is_none(tmp_path):
+    path = tmp_path / "data" / "config.json"
+
+    ensure_config(path)
+
+    config = load_config(path)
+    assert config.searches and all("example.com" in s.url for s in config.searches)
+
+
+def test_ensure_config_leaves_an_existing_config_alone(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"theme": "light"}')
+
+    ensure_config(path)
+
+    assert path.read_text() == '{"theme": "light"}'
