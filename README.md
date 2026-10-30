@@ -78,7 +78,7 @@ Data lives in `~/.quickpick-data/`:
 - `launcher.txt`: the `g:` launcher store, one `key~!~url` entry per line (e.g. `quickpick~!~https://github.com/mlessley/quickpick`).
 - `digest/YYYY-MM-DD.jsonl`: one file per day of notes and screenshots, one JSON entry per line. Screenshot entries store the image's full path, so if you move images, update those paths too.
 - `screenshots/`: a suggested home for GreenShot's captures. Set it as GreenShot's storage location (Preferences, Output); Quickpick follows whatever folder GreenShot uses.
-- `config.json` (optional): **Ctrl+,** in the popup opens it in Notepad, first creating it with sample entries if there isn't one. It's read at startup, so restart Quickpick (**Ctrl+Q** twice) after changing it.
+- `config.json` (optional): **Ctrl+,** in the popup opens it in Notepad, first creating it with sample entries if there isn't one, and otherwise keeping the version before your edit as `config.json.bak`. It's read at startup: **Ctrl+R** restarts Quickpick to apply your changes, the same way it was started (from a console, the new one opens in a console of its own). If the config has a mistake, Ctrl+R says what it is and keeps the running Quickpick instead.
   - `summon_hotkey`: e.g. `"ctrl+shift+q"`. Modifiers are `ctrl`, `alt`, `shift`, `win`. Default `"ctrl+alt+space"`.
   - `screenshot_hotkey`: default `"ctrl+alt+s"`.
   - `greenshot_hotkey` / `screenshot_dir`: override the capture hotkey and save folder otherwise read from GreenShot's settings.

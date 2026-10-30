@@ -4,6 +4,7 @@
 import ctypes
 import os
 import shutil
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -16,10 +17,45 @@ LOG_MAX_BYTES = 1_000_000
 MB_ICONERROR = 0x10
 MB_TOPMOST = 0x40000
 SHORTCUT_NAME = "Quickpick.lnk"
+# Set for a restarted Quickpick: the process id of the one it replaces, to wait out
+WAIT_FOR_ENV = "QUICKPICK_WAIT_FOR"
+WAIT_FOR_MS = 15_000
+SYNCHRONIZE = 0x100000
+CREATE_NEW_CONSOLE = 0x10
 
 
 def show_error(message: str) -> None:
     ctypes.windll.user32.MessageBoxW(0, message, "Quickpick", MB_ICONERROR | MB_TOPMOST)
+
+
+def relaunch(pid: int) -> None:
+    """Start Quickpick again the way this one was started (Ctrl+R), told to wait until
+    process pid has exited, so its hotkeys and the viewer's port are free. Started from a
+    console, the new one gets its own, since it can't take over this one's."""
+    env = os.environ | {WAIT_FOR_ENV: str(pid)}
+    # sys.executable, not orig_argv[0]: a venv's python.exe hands over to the base
+    # interpreter, which doesn't have the venv's packages
+    command = [sys.executable, *sys.orig_argv[1:]]
+    subprocess.Popen(command, env=env, creationflags=CREATE_NEW_CONSOLE)
+
+
+def wait_for_previous() -> None:
+    """In a restarted Quickpick, wait for the one it replaces to finish exiting."""
+    pid = os.environ.pop(WAIT_FOR_ENV, None)
+    if not pid:
+        return
+    import pywintypes
+    import win32api
+    import win32event
+
+    try:
+        process = win32api.OpenProcess(SYNCHRONIZE, False, int(pid))
+    except (pywintypes.error, ValueError):
+        return  # already gone
+    try:
+        win32event.WaitForSingleObject(process, WAIT_FOR_MS)
+    finally:
+        process.Close()
 
 
 def gui_main() -> None:

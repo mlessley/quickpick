@@ -118,7 +118,8 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
         (
             "Settings",
             [
-                ("Ctrl+,", "Open config.json (restart to apply)"),
+                ("Ctrl+,", "Edit config.json (backed up first)"),
+                ("Ctrl+R", "Restart, to apply config changes"),
                 ("Files", str(Path("~") / DATA_DIR.relative_to(Path.home()))),
             ],
         )

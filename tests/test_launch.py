@@ -47,3 +47,34 @@ def test_the_shortcut_runs_the_console_free_entry_point_with_uvw_from_the_repo()
     assert target == uvw
     assert arguments == f'run --project "{repo}" quickpick-gui'
     assert working_dir == repo
+
+
+def test_relaunch_starts_the_same_command_waiting_for_this_process(monkeypatch):
+    started = []
+    monkeypatch.setattr(
+        launch.subprocess, "Popen", lambda args, **kwargs: started.append((args, kwargs))
+    )
+    # A venv's python hands over to the base interpreter, which is what orig_argv names
+    monkeypatch.setattr(sys, "orig_argv", ["C:/base/pythonw.exe", "quickpick-gui"])
+    monkeypatch.setattr(sys, "executable", "C:/repo/.venv/Scripts/pythonw.exe")
+
+    launch.relaunch(pid=4321)
+
+    [(args, kwargs)] = started
+    assert args == ["C:/repo/.venv/Scripts/pythonw.exe", "quickpick-gui"]
+    assert kwargs["env"][launch.WAIT_FOR_ENV] == "4321"
+
+
+def test_wait_for_previous_returns_at_once_without_one(monkeypatch):
+    monkeypatch.delenv(launch.WAIT_FOR_ENV, raising=False)
+
+    launch.wait_for_previous()
+
+
+def test_wait_for_previous_returns_when_that_process_is_gone(monkeypatch):
+    # A process id that isn't running
+    monkeypatch.setenv(launch.WAIT_FOR_ENV, "999999")
+
+    launch.wait_for_previous()
+
+    assert launch.WAIT_FOR_ENV not in launch.os.environ

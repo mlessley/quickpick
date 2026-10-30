@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from quickpick.config import ensure_config, load_config
+from quickpick.config import backup_config, config_problem, ensure_config, load_config
 
 
 def test_missing_file_uses_default_summon_hotkey(tmp_path):
@@ -127,3 +127,39 @@ def test_ensure_config_leaves_an_existing_config_alone(tmp_path):
     ensure_config(path)
 
     assert path.read_text() == '{"theme": "light"}'
+
+
+def test_config_problem_is_none_for_a_good_or_missing_config(tmp_path):
+    path = tmp_path / "config.json"
+    assert config_problem(path) is None
+    path.write_text('{"theme": "light"}')
+    assert config_problem(path) is None
+
+
+def test_config_problem_names_what_is_wrong(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"searches": [{"command": "w", "name": "Wiki", "url": "https://x.test/"}]}')
+
+    assert "{query}" in config_problem(path)
+
+
+def test_config_problem_reports_broken_json(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"theme": "light",}')
+
+    assert config_problem(path)
+
+
+def test_backup_config_copies_it_beside_itself(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"theme": "light"}')
+
+    backup_config(path)
+
+    assert (tmp_path / "config.json.bak").read_text() == '{"theme": "light"}'
+
+
+def test_backup_config_without_a_config_does_nothing(tmp_path):
+    backup_config(tmp_path / "config.json")
+
+    assert list(tmp_path.iterdir()) == []

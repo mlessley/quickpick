@@ -1,3 +1,4 @@
+import os
 import queue
 import subprocess
 import sys
@@ -11,7 +12,15 @@ from tkinter import ttk
 from pydantic import ValidationError
 
 from quickpick.app_switch import app_key_sequences, bring_to_front, list_windows, pick_window
-from quickpick.config import CONFIG_PATH, DATA_DIR, AppShortcut, ensure_config, load_config
+from quickpick.config import (
+    CONFIG_PATH,
+    DATA_DIR,
+    AppShortcut,
+    backup_config,
+    config_problem,
+    ensure_config,
+    load_config,
+)
 from quickpick.digest import (
     CONTINUATION,
     DigestEntry,
@@ -22,6 +31,7 @@ from quickpick.digest import (
 )
 from quickpick.edge import profile_dir
 from quickpick.hotkey import Hotkey, HotkeyListener, HotkeyRegistrationError, parse_hotkey
+from quickpick.launch import relaunch, wait_for_previous
 from quickpick.launchers import (
     CommandMenu,
     JiraLauncher,
@@ -271,6 +281,10 @@ class Popup:
         self.entry.bind("<Control-Up>", lambda _event: self._collapse_panes(True))
         self.entry.bind("<Control-Down>", lambda _event: self._collapse_panes(False))
         self.entry.bind("<Control-comma>", self._on_open_config)
+        self.entry.bind("<Control-r>", self._on_restart)
+        self.entry.bind("<Control-R>", self._on_restart)  # with Caps Lock on
+        # Set by Ctrl+R: main starts Quickpick again once this one has closed
+        self.restart_requested = False
         for key, handler in (
             ("l", self._on_clear),
             ("e", self._on_edit_today),
@@ -389,9 +403,21 @@ class Popup:
     def _on_open_config(self, _event: object) -> str:
         """Ctrl+,: the config in Notepad, created from a sample if there's none yet. It's
         read at startup, so changes need a restart."""
+        backup_config(CONFIG_PATH)
         ensure_config(CONFIG_PATH)
         subprocess.Popen(["notepad.exe", str(CONFIG_PATH)])
-        self._say("Opened config.json · restart Quickpick to apply (Ctrl+Q twice)")
+        self._say("Opened config.json (copy kept as config.json.bak) · Ctrl+R to restart")
+        return "break"
+
+    def _on_restart(self, _event: object) -> str:
+        """Ctrl+R: start Quickpick again, to apply config changes; not if the config has a
+        mistake, which would stop the new one from starting."""
+        problem = config_problem(CONFIG_PATH)
+        if problem:
+            self._say(f"Not restarting, config.json has a problem: {problem}")
+        else:
+            self.restart_requested = True
+            self.root.quit()
         return "break"
 
     def _on_quit_key(self, _event: object) -> str:
@@ -1208,6 +1234,7 @@ def splash_status(digest_dir: Path, timer: FocusTimer) -> list[str]:
 
 
 def main() -> None:
+    wait_for_previous()
     try:
         config = load_config(CONFIG_PATH)
     except ValidationError as error:
@@ -1306,6 +1333,8 @@ def main() -> None:
         for listener in listeners:
             listener.stop()
         viewer.close()
+    if popup.restart_requested:
+        relaunch(os.getpid())
 
 
 if __name__ == "__main__":

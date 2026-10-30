@@ -1,7 +1,8 @@
 import os
+import shutil
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from quickpick.app_switch import RESERVED_APP_KEYS, normalize_app_key
 from quickpick.browser import Browser
@@ -142,6 +143,23 @@ def ensure_config(path: Path) -> None:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(SAMPLE_CONFIG, encoding="utf-8")
+
+
+def backup_config(path: Path) -> None:
+    """Copy the config to config.json.bak before it's edited, replacing the last copy."""
+    if path.exists():
+        shutil.copyfile(path, path.with_name(path.name + ".bak"))
+
+
+def config_problem(path: Path) -> str | None:
+    """What's wrong with the config, briefly (the first problem), or None if it's fine."""
+    try:
+        load_config(path)
+    except ValidationError as error:
+        first = error.errors()[0]
+        where = ".".join(str(part) for part in first["loc"])
+        return f"{where}: {first['msg']}" if where else first["msg"]
+    return None
 
 
 def load_config(path: Path) -> Config:
