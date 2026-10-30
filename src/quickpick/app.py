@@ -31,6 +31,7 @@ from quickpick.digest import (
 )
 from quickpick.edge import profile_dir
 from quickpick.hotkey import Hotkey, HotkeyListener, HotkeyRegistrationError, parse_hotkey
+from quickpick.icon import ICON_PATH
 from quickpick.launch import relaunch, wait_for_previous
 from quickpick.launchers import (
     CommandMenu,
@@ -189,6 +190,8 @@ class Popup:
 
         self.root = tk.Tk()
         self.root.withdraw()
+        # Every window's icon, e.g. in Alt+Tab
+        self.root.iconbitmap(default=str(ICON_PATH))
         self.root.overrideredirect(True)
         self.root.geometry(f"{WIDTH}x{HEIGHT}+200+200")
         self.root.option_add("*Font", FONT)

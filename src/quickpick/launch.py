@@ -10,6 +10,7 @@ import traceback
 from pathlib import Path
 
 from quickpick.config import DATA_DIR
+from quickpick.icon import ICON_PATH
 
 LOG_PATH = DATA_DIR / "quickpick.log"
 # Started afresh past this size, so the log never grows without bound
@@ -126,5 +127,6 @@ def install_shortcuts() -> None:
         shortcut.Arguments = arguments
         shortcut.WorkingDirectory = str(working_dir)
         shortcut.Description = "Quickpick"
+        shortcut.IconLocation = f"{ICON_PATH},0"
         shortcut.Save()
         print(f"Created {folder / SHORTCUT_NAME}")
