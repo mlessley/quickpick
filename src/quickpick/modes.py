@@ -26,6 +26,7 @@ from quickpick.digest import (
 from quickpick.edge import Link, filter_links, parse_bookmarks, read_history, visit_label
 from quickpick.markup import first_url
 from quickpick.scratch import ScratchEntry, ScratchList, parse_addition
+from quickpick.screenshot import move_capture, newest_png
 from quickpick.store import StoreEntry, filter_entries, parse_store
 from quickpick.tags import (
     ActiveTags,
@@ -258,11 +259,16 @@ class NotesMode:
         open_viewer: Callable[[], None] | None = None,
         tags: ActiveTags | None = None,
         browser: Browser = "edge",
+        image_folder: Path | None = None,
+        downloads: Path | None = None,
     ) -> None:
         self.digest_dir = digest_dir
         self.today = today
         self.open_viewer = open_viewer
         self.browser = browser
+        # Where screenshots go, and where Ctrl+I takes a downloaded image from
+        self.image_folder = image_folder
+        self.downloads = downloads
         self.tags = tags or ActiveTags()
         self.entries: list[DigestEntry] = []
         # The last week's earlier days with entries, shown greyed above today as context
@@ -319,6 +325,29 @@ class NotesMode:
         if not self._shown(self.entries):
             rows.append(Muted(NOTES_EMPTY_HINT))
         return [[self._todo_row(todo) for _id, todo in self.todos], rows]
+
+    def add_download(self, now: datetime) -> bool:
+        """Ctrl+I: move the PNG just downloaded (e.g. from Copilot) into the screenshot
+        folder and log it like a screenshot, with the tags that are on."""
+        if self.image_folder is None:
+            self.notice = "No screenshot folder set (GreenShot's, or screenshot_dir)"
+            return False
+        image = newest_png(self.downloads, now) if self.downloads else None
+        if image is None:
+            self.notice = "No new PNG in Downloads"
+            return False
+        try:
+            moved = move_capture(image, self.image_folder, now, image.stem)
+        except OSError:
+            self.notice = f"Couldn't move {image.name}; is it still downloading?"
+            return False
+        entry = DigestEntry(
+            time=now, kind="screenshot", text=image.name, path=str(moved), tags=self.tags.snapshot()
+        )
+        append_entry(self.digest_dir, entry)
+        self.reload()
+        self.notice = f"Added {image.name}"
+        return True
 
     def open_url(self, selection: Selection | None) -> bool:
         """Ctrl+U or a double-click: open the first web address in the selected todo or

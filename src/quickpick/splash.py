@@ -71,6 +71,7 @@ def hotkey_groups(config: Config, launchers: Sequence[Launcher]) -> list[HotkeyG
             [
                 ("[] text", "Add a todo"),
                 ("Ctrl+D", "Tick off a todo"),
+                ("Ctrl+I", "Add the PNG just downloaded"),
                 ("#tag", "Tag on / off"),
                 ("name: text", "Label a line"),
                 (": / ...", "List / continue labels"),

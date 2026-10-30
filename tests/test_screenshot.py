@@ -1,4 +1,5 @@
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from quickpick.screenshot import (
     capture_name,
     find_new_image,
     list_files,
+    move_capture,
+    newest_png,
     parse_greenshot_ini,
     rename_capture,
 )
@@ -94,3 +97,54 @@ def test_keeps_greenshots_name_when_the_file_cant_be_renamed(tmp_path):
     missing = tmp_path / "gone.png"
 
     assert rename_capture(missing, STARTED, "Paint") == missing
+
+
+NOW = datetime(2026, 10, 29, 14, 5, 12)
+
+
+def _png(folder: Path, name: str, age_minutes: float) -> Path:
+    image = folder / name
+    image.write_bytes(b"png")
+    stamp = (NOW - timedelta(minutes=age_minutes)).timestamp()
+    os.utime(image, (stamp, stamp))
+    return image
+
+
+def test_newest_png_is_the_most_recent_one_within_the_hour(tmp_path):
+    _png(tmp_path, "older.png", age_minutes=20)
+    newest = _png(tmp_path, "copilot-image.PNG", age_minutes=2)
+    (tmp_path / "notes.txt").write_text("x")
+
+    assert newest_png(tmp_path, NOW) == newest
+
+
+def test_newest_png_ignores_ones_older_than_an_hour(tmp_path):
+    _png(tmp_path, "stale.png", age_minutes=61)
+
+    assert newest_png(tmp_path, NOW) is None
+
+
+def test_newest_png_of_a_missing_folder_is_none(tmp_path):
+    assert newest_png(tmp_path / "missing", NOW) is None
+
+
+def test_move_capture_moves_and_names_it_like_a_screenshot(tmp_path):
+    downloads, shots = tmp_path / "Downloads", tmp_path / "shots"
+    downloads.mkdir()
+    shots.mkdir()
+    image = _png(downloads, "copilot-image.png", age_minutes=1)
+
+    moved = move_capture(image, shots, NOW, "copilot-image")
+
+    assert moved == shots / "2026-10-29 14_05_12-copilot-image.png"
+    assert moved.read_bytes() == b"png"
+    assert not image.exists()
+
+
+def test_move_capture_numbers_a_taken_name(tmp_path):
+    (tmp_path / "2026-10-29 14_05_12-x.png").write_bytes(b"first")
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    image = _png(downloads, "x.png", age_minutes=1)
+
+    assert move_capture(image, tmp_path, NOW, "x").name == "2026-10-29 14_05_12-x (2).png"

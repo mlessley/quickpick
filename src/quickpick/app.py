@@ -44,6 +44,7 @@ from quickpick.modes import (
 from quickpick.scratch import ScratchList
 from quickpick.screenshot import (
     capture_name,
+    downloads_folder,
     find_new_image,
     list_files,
     modifiers_held,
@@ -269,6 +270,7 @@ class Popup:
             ("e", self._on_edit_today),
             ("f", self._on_search_key),
             ("u", self._on_open_url),
+            ("i", self._on_add_download),
         ):
             for sequence in (f"<Control-{key}>", f"<Control-{key.upper()}>"):
                 self.entry.bind(sequence, handler)
@@ -924,6 +926,15 @@ class Popup:
             self._say("Cleared · PageUp shows earlier")
         return "break"
 
+    def _on_add_download(self, _event: object) -> str:
+        """Ctrl+I in notes: log the PNG just downloaded, e.g. one Copilot made."""
+        if isinstance(self.mode, NotesMode) and self.view is self.mode:
+            self.mode.add_download(datetime.now().replace(microsecond=0))
+            self._say(self.mode.notice or "")
+            self.mode.notice = None
+            self._refresh_matches()
+        return "break"
+
     def _on_edit_today(self, _event: object) -> str:
         """Ctrl+E in notes: today's digest file in Notepad, to correct it by hand."""
         if isinstance(self.mode, NotesMode):
@@ -1169,6 +1180,8 @@ def main() -> None:
     if earlier_scratch_path.exists() and not scratch_path.exists():
         earlier_scratch_path.rename(scratch_path)
     viewer = BackgroundViewer(config, DATA_DIR / "digest")
+    greenshot = read_greenshot_settings()
+    screenshot_folder = config.screenshot_dir or greenshot.output_dir
     tags = ActiveTags()
     timer = FocusTimer(DATA_DIR / "digest", tags)
     launchers: list[Launcher] = [
@@ -1187,7 +1200,12 @@ def main() -> None:
     popup = Popup(
         [
             NotesMode(
-                DATA_DIR / "digest", open_viewer=viewer.open, tags=tags, browser=config.browser
+                DATA_DIR / "digest",
+                open_viewer=viewer.open,
+                tags=tags,
+                browser=config.browser,
+                image_folder=screenshot_folder,
+                downloads=downloads_folder(),
             ),
             StashMode(
                 store_path,
@@ -1206,14 +1224,13 @@ def main() -> None:
         NoteSearch(DATA_DIR / "digest", open_viewer=viewer.open),
     )
 
-    greenshot = read_greenshot_settings()
     capture = ScreenshotCapture(
         popup,
         greenshot_hotkey=parse_hotkey(
             config.greenshot_hotkey or greenshot.region_hotkey or "printscreen",
             require_modifier=False,
         ),
-        folder=config.screenshot_dir or greenshot.output_dir,
+        folder=screenshot_folder,
         digest_dir=DATA_DIR / "digest",
     )
 

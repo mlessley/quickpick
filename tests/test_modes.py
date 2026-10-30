@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from pathlib import Path
 
 import pyperclip
 import pytest
@@ -18,6 +19,7 @@ from quickpick.modes import (
     StashMode,
 )
 from quickpick.scratch import ScratchList
+from quickpick.tags import ActiveTags
 
 
 def stash(tmp_path, saved: str = "") -> StashMode:
@@ -341,3 +343,47 @@ def test_open_url_in_the_stash_opens_an_address_value_instead_of_copying(
     assert mode.open_url((0, 0))
     assert opened == [("https://jira.example.com", "edge")]
     assert clipboard == []
+
+
+def _downloaded(downloads, name: str) -> None:
+    downloads.mkdir(exist_ok=True)
+    (downloads / name).write_bytes(b"png")
+
+
+def test_add_download_logs_the_newest_png_as_an_image_entry(tmp_path):
+    digest, downloads, shots = tmp_path / "digest", tmp_path / "Downloads", tmp_path / "shots"
+    shots.mkdir()
+    _downloaded(downloads, "copilot-image.png")
+    tags = ActiveTags()
+    tags.toggle("project-x")
+    mode = NotesMode(digest, image_folder=shots, downloads=downloads, tags=tags)
+
+    assert mode.add_download(datetime.now().replace(microsecond=0))
+
+    [entry] = mode.entries
+    assert (entry.kind, entry.text, entry.tags) == (
+        "screenshot",
+        "copilot-image.png",
+        ("project-x",),
+    )
+    assert Path(entry.path).parent == shots and Path(entry.path).exists()
+    assert not (downloads / "copilot-image.png").exists()
+    assert mode.notice == "Added copilot-image.png"
+
+
+def test_add_download_says_so_when_there_is_no_new_png(tmp_path):
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    mode = NotesMode(tmp_path / "digest", image_folder=shots, downloads=tmp_path / "Downloads")
+
+    assert not mode.add_download(datetime.now())
+    assert mode.notice == "No new PNG in Downloads"
+    assert mode.entries == []
+
+
+def test_add_download_needs_a_screenshot_folder(tmp_path):
+    _downloaded(tmp_path / "Downloads", "x.png")
+    mode = NotesMode(tmp_path / "digest", image_folder=None, downloads=tmp_path / "Downloads")
+
+    assert not mode.add_download(datetime.now())
+    assert mode.notice == "No screenshot folder set (GreenShot's, or screenshot_dir)"

@@ -1,11 +1,14 @@
 import configparser
 import os
 import re
+import shutil
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
+import pywintypes
 import win32api
+from win32com.shell import shell
 
 from quickpick.hotkey import MODIFIERS, Hotkey
 
@@ -76,15 +79,51 @@ def rename_capture(image: Path, started: datetime, context: str) -> Path:
     name = capture_name(started, context, image.suffix)
     if image.name == name:
         return image
-    target = image.with_name(name)
-    copy = 1
-    while target.exists():
-        copy += 1
-        target = image.with_name(f"{Path(name).stem} ({copy}){image.suffix}")
     try:
-        return image.rename(target)
+        return image.rename(_free_path(image.with_name(name)))
     except OSError:
         return image
+
+
+def _free_path(target: Path) -> Path:
+    """target, or if that's taken, the first free "name (2).png", "name (3).png", ..."""
+    copy = 1
+    free = target
+    while free.exists():
+        copy += 1
+        free = target.with_name(f"{target.stem} ({copy}){target.suffix}")
+    return free
+
+
+FOLDERID_DOWNLOADS = "{374DE290-123F-4565-9164-39C4925E467B}"
+# A downloaded image older than this isn't the one just made (Ctrl+I in notes)
+DOWNLOAD_MAX_AGE = timedelta(hours=1)
+
+
+def newest_png(folder: Path, now: datetime) -> Path | None:
+    """The most recently saved PNG in folder, if it's under DOWNLOAD_MAX_AGE old."""
+    try:
+        images = [path for path in folder.iterdir() if path.suffix.lower() == ".png"]
+    except OSError:
+        return None
+    since = (now - DOWNLOAD_MAX_AGE).timestamp()
+    recent = [(path.stat().st_mtime, path) for path in images if path.stat().st_mtime >= since]
+    return max(recent)[1] if recent else None
+
+
+def move_capture(image: Path, folder: Path, started: datetime, context: str) -> Path:
+    """Move an image made elsewhere (e.g. downloaded) into the screenshot folder, named
+    like a capture; OSError if it can't be moved."""
+    target = _free_path(folder / capture_name(started, context, image.suffix.lower()))
+    return Path(shutil.move(image, target))
+
+
+def downloads_folder() -> Path:
+    """The user's Downloads folder, wherever Windows has it."""
+    try:
+        return Path(shell.SHGetKnownFolderPath(FOLDERID_DOWNLOADS))
+    except pywintypes.com_error:
+        return Path.home() / "Downloads"
 
 
 def read_greenshot_settings() -> GreenshotSettings:
