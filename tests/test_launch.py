@@ -49,20 +49,37 @@ def test_the_shortcut_runs_the_console_free_entry_point_with_uvw_from_the_repo()
     assert working_dir == repo
 
 
-def test_relaunch_starts_the_same_command_waiting_for_this_process(monkeypatch):
-    started = []
+@pytest.fixture
+def started(monkeypatch):
+    calls = []
     monkeypatch.setattr(
-        launch.subprocess, "Popen", lambda args, **kwargs: started.append((args, kwargs))
+        launch.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs))
     )
     # A venv's python hands over to the base interpreter, which is what orig_argv names
     monkeypatch.setattr(sys, "orig_argv", ["C:/base/pythonw.exe", "quickpick-gui"])
     monkeypatch.setattr(sys, "executable", "C:/repo/.venv/Scripts/pythonw.exe")
+    return calls
+
+
+def test_relaunch_without_a_console_starts_the_same_command_with_no_window(monkeypatch, started):
+    monkeypatch.setattr(launch, "has_visible_console", lambda: False)
 
     launch.relaunch(pid=4321)
 
     [(args, kwargs)] = started
-    assert args == ["C:/repo/.venv/Scripts/pythonw.exe", "quickpick-gui"]
+    # The venv's pythonw hands over to a console python, which would get a console window
+    assert args == [str(Path("C:/repo/.venv/Scripts/python.exe")), "quickpick-gui"]
+    assert kwargs["creationflags"] == launch.CREATE_NO_WINDOW
     assert kwargs["env"][launch.WAIT_FOR_ENV] == "4321"
+
+
+def test_relaunch_from_a_console_opens_a_console_of_its_own(monkeypatch, started):
+    monkeypatch.setattr(launch, "has_visible_console", lambda: True)
+
+    launch.relaunch(pid=4321)
+
+    [(_args, kwargs)] = started
+    assert kwargs["creationflags"] == launch.CREATE_NEW_CONSOLE
 
 
 def test_wait_for_previous_returns_at_once_without_one(monkeypatch):

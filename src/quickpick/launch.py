@@ -22,21 +22,31 @@ WAIT_FOR_ENV = "QUICKPICK_WAIT_FOR"
 WAIT_FOR_MS = 15_000
 SYNCHRONIZE = 0x100000
 CREATE_NEW_CONSOLE = 0x10
+CREATE_NO_WINDOW = 0x08000000
 
 
 def show_error(message: str) -> None:
     ctypes.windll.user32.MessageBoxW(0, message, "Quickpick", MB_ICONERROR | MB_TOPMOST)
 
 
+def has_visible_console() -> bool:
+    """True when Quickpick was started in a console window someone can see."""
+    console = ctypes.windll.kernel32.GetConsoleWindow()
+    return bool(console) and bool(ctypes.windll.user32.IsWindowVisible(console))
+
+
 def relaunch(pid: int) -> None:
     """Start Quickpick again the way this one was started (Ctrl+R), told to wait until
     process pid has exited, so its hotkeys and the viewer's port are free. Started from a
-    console, the new one gets its own, since it can't take over this one's."""
+    console, the new one gets a console of its own, since it can't take over this one's;
+    otherwise it gets none, as when started from the Start menu."""
     env = os.environ | {WAIT_FOR_ENV: str(pid)}
-    # sys.executable, not orig_argv[0]: a venv's python.exe hands over to the base
-    # interpreter, which doesn't have the venv's packages
-    command = [sys.executable, *sys.orig_argv[1:]]
-    subprocess.Popen(command, env=env, creationflags=CREATE_NEW_CONSOLE)
+    # The venv's own python, not orig_argv[0]: that's the base interpreter a venv's
+    # python hands over to, which doesn't have the venv's packages. python.exe rather
+    # than pythonw.exe, which hands over to a console python that would show a window
+    python = str(Path(sys.executable).with_name("python.exe"))
+    flags = CREATE_NEW_CONSOLE if has_visible_console() else CREATE_NO_WINDOW
+    subprocess.Popen([python, *sys.orig_argv[1:]], env=env, creationflags=flags)
 
 
 def wait_for_previous() -> None:
