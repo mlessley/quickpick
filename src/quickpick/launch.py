@@ -95,7 +95,9 @@ def gui_main() -> None:
 def shortcut_command(repo: Path, uvw: Path) -> tuple[Path, str, Path]:
     """(target, arguments, working folder) for a shortcut that starts Quickpick with no
     console, running this checkout through uv so its environment is kept in sync."""
-    return uvw, f'run --project "{repo}" quickpick-gui', repo
+    # python -m quickpick.gui, not the quickpick-gui script, which would open a console
+    # window (see quickpick.gui)
+    return uvw, f'run --project "{repo}" python -m quickpick.gui', repo
 
 
 def shortcut_folders() -> list[Path]:

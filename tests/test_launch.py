@@ -39,13 +39,15 @@ def test_a_crash_is_logged_and_points_at_the_log(monkeypatch, shown):
     assert str(launch.LOG_PATH) in shown[0]
 
 
-def test_the_shortcut_runs_the_console_free_entry_point_with_uvw_from_the_repo():
+def test_the_shortcut_runs_the_gui_module_with_uvw_from_the_repo():
     repo, uvw = Path("C:/source/repos/quickpick"), Path("C:/Users/me/bin/uvw.exe")
 
     target, arguments, working_dir = launch.shortcut_command(repo, uvw)
 
     assert target == uvw
-    assert arguments == f'run --project "{repo}" quickpick-gui'
+    # Not the quickpick-gui script: it goes through the venv's pythonw.exe, which uv makes
+    # a console launcher, so a console window would open
+    assert arguments == f'run --project "{repo}" python -m quickpick.gui'
     assert working_dir == repo
 
 
