@@ -948,7 +948,9 @@ class Popup:
         return "break"
 
     def _on_complete(self, _event: object) -> str:
-        """Ctrl+D in notes: tick off the selected todo."""
+        """Ctrl+D in notes: tick off the selected todo. In the `/j` list: remove the link."""
+        if isinstance(self.view, JiraLauncher):
+            return self._on_remove(_event)
         if isinstance(self.view, NotesMode):
             if self.view.complete(self._selection()):
                 self._say("Todo ticked off")
@@ -1056,10 +1058,18 @@ class Popup:
         return self._on_activate(event)
 
     def _on_remove(self, _event: object) -> str:
-        """Ctrl+Delete in the stash: drop the selected scratch entry."""
-        if isinstance(self.view, StashMode) and self.view.remove(self._selection()):
+        """Ctrl+Delete in the stash: drop the selected scratch entry. In the `/j` list (also
+        Ctrl+D): drop the selected link, keeping the selection where it was."""
+        selection = self._selection()
+        if isinstance(self.view, StashMode) and self.view.remove(selection):
             self._say("Removed from the stash")
             self._refresh_matches()
+        elif isinstance(self.view, JiraLauncher) and self.view.remove(selection):
+            self._say("Removed from the list")
+            self._refresh_matches()
+            if selection is not None:
+                pane, index = selection
+                self._select(pane, min(index, self.match_counts[pane] - 1))
         return "break"
 
 
@@ -1186,7 +1196,13 @@ def main() -> None:
     timer = FocusTimer(DATA_DIR / "digest", tags)
     launchers: list[Launcher] = [
         StoreLauncher("g", "Repo shortcuts", DATA_DIR / "launcher.txt", config.browser),
-        JiraLauncher("j", config.jira_base_url, config.jira_default_project, config.browser),
+        JiraLauncher(
+            "j",
+            config.jira_base_url,
+            config.jira_default_project,
+            DATA_DIR / "jira.txt",
+            config.browser,
+        ),
         TimerLauncher(timer),
         *(
             SearchLauncher(search.command, search.name, search.url, config.browser)

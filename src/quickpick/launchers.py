@@ -3,11 +3,20 @@
 import re
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
 
 from quickpick.browser import Browser, choose_browser, open_in_new_window
+from quickpick.jira_list import (
+    JiraLink,
+    filter_jira_links,
+    forget,
+    format_jira_list,
+    parse_jira_list,
+    remember,
+)
 from quickpick.modes import Mode, Muted, Row, Selection
 from quickpick.store import StoreEntry, filter_entries, parse_store
 
@@ -168,54 +177,123 @@ class CommandMenu:
 
 
 ISSUE_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_]*-\d+")
+# What `/j` reads: digits or an issue key, or a pasted address, each optionally followed by
+# a title; anything else is a text search
+NUMBER_TITLED = re.compile(r"(\d+)(?:\s+(.*))?", re.DOTALL)
+KEY_TITLED = re.compile(rf"({ISSUE_KEY.pattern})(?:\s+(.*))?", re.DOTALL)
+URL_TITLED = re.compile(r"(https?://\S+)(?:\s+(.*))?", re.DOTALL)
+BROWSE_KEY = re.compile(rf"/browse/({ISSUE_KEY.pattern})")
 
 
-def jira_target(rest: str, base_url: str, default_project: str) -> tuple[str, str]:
-    """The synthetic entry for `/j <rest>`: its label and the URL it opens."""
+@dataclass(frozen=True)
+class JiraTarget:
+    """The synthetic entry for `/j <rest>`: its label and the URL it opens; and, if opening
+    it is remembered in the list, the title typed for it (None if none) and the title it
+    gets without one (None: not remembered, e.g. a text search)."""
+
+    label: str
+    url: str
+    title: str | None = None
+    fallback: str | None = None
+
+
+def jira_target(rest: str, base_url: str, default_project: str) -> JiraTarget:
     base = base_url.rstrip("/")
     text = rest.strip()
     if not text:
-        return f"Open {default_project} (default project)", f"{base}/browse/{default_project}"
-    if text.isdigit():
-        key = f"{default_project}-{text}"
-        return f"{key} (default project)", f"{base}/browse/{key}"
-    if ISSUE_KEY.fullmatch(text):
-        key = text.upper()
-        return key, f"{base}/browse/{key}"
+        return JiraTarget(
+            f"Open {default_project} (default project)", f"{base}/browse/{default_project}"
+        )
+    number = NUMBER_TITLED.fullmatch(text)
+    if number:
+        key = f"{default_project}-{number[1]}"
+        title = f"{key} {number[2]}" if number[2] else None
+        return JiraTarget(f"{title or key} (default project)", f"{base}/browse/{key}", title, key)
+    issue = KEY_TITLED.fullmatch(text)
+    if issue:
+        key = issue[1].upper()
+        title = f"{key} {issue[2]}" if issue[2] else None
+        return JiraTarget(title or key, f"{base}/browse/{key}", title, key)
+    address = URL_TITLED.fullmatch(text)
+    if address:
+        url, title = address[1], address[2] or None
+        browse = BROWSE_KEY.search(url)
+        fallback = browse[1].upper() if browse else url
+        return JiraTarget(f"Open {title or fallback}", url, title, fallback)
     jql = quote(f'text ~ "{text}"', safe="")
-    return f'Search Jira for "{text}"', f"{base}/issues/?jql={jql}"
+    return JiraTarget(f'Search Jira for "{text}"', f"{base}/issues/?jql={jql}")
 
 
 class JiraLauncher:
-    """`/j` opens a Jira issue: digits in the default project, a full key, or a text search."""
+    """`/j` opens a Jira issue (digits in the default project, a full key, or a pasted
+    address) or a text search; below that, the list of pinned and recently opened links."""
 
     panes = ("",)
     shows_tail = False
-    hint = "Enter open · Ctrl+Enter other browser"
+    hint = "Enter open · Ctrl+Enter other browser · Ctrl+Del remove · F2 edit list"
     notice: str | None = None
 
     def __init__(
-        self, command: str, base_url: str, default_project: str, browser: Browser = "edge"
+        self,
+        command: str,
+        base_url: str,
+        default_project: str,
+        list_path: Path,
+        browser: Browser = "edge",
     ) -> None:
         self.command = command
         self.name = f"/{command} Jira issue"
         self.base_url = base_url
         self.default_project = default_project
+        self.list_path = list_path
         self.browser = browser
-        self.url = ""
+        self.links: list[JiraLink] = []
+        self.target = JiraTarget("", "")
+        self.matches: list[JiraLink] = []
 
     def reload(self) -> None:
-        pass
+        try:
+            self.links = parse_jira_list(self.list_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            self.links = []
 
     def search(self, query: str) -> list[list[str]]:
-        label, self.url = jira_target(query, self.base_url, self.default_project)
-        return [[label]]
+        self.target = jira_target(query, self.base_url, self.default_project)
+        # "1234 a title" narrows the list to that issue, not to the title being typed
+        self.matches = filter_jira_links(self.links, self.target.fallback or query)
+        rows = [f"📌 {link.title}" if link.pinned else link.title for link in self.matches]
+        return [[self.target.label, *rows]]
 
     def activate(self, query: str, selection: Selection | None, alternate: bool) -> None:
-        if selection is not None:
-            browser = choose_browser(self.browser, alternate)
-            open_in_new_window(self.url, browser)
-            self.notice = f"Opened Jira in {browser.title()}"
+        if selection is None:
+            return
+        index = selection[1]
+        if index == 0:
+            url, title, fallback = self.target.url, self.target.title, self.target.fallback
+        else:
+            link = self.matches[index - 1]
+            url, title, fallback = link.url, None, link.title
+        browser = choose_browser(self.browser, alternate)
+        open_in_new_window(url, browser)
+        self.notice = f"Opened {title or fallback or 'Jira'} in {browser.title()}"
+        if fallback is not None:
+            self._save(remember(self.links, url, title, fallback))
+
+    def remove(self, selection: Selection | None) -> bool:
+        """Ctrl+Delete or Ctrl+D: drop the selected link from the list."""
+        if selection is None or not 0 < selection[1] <= len(self.matches):
+            return False
+        self._save(forget(self.links, self.matches[selection[1] - 1]))
+        return True
 
     def edit(self) -> bool:
-        return False
+        """F2: the list in Notepad, to add titles and `!` pins."""
+        if not self.list_path.exists():
+            self._save(self.links)
+        subprocess.Popen(["notepad.exe", str(self.list_path)])
+        return True
+
+    def _save(self, links: list[JiraLink]) -> None:
+        self.links = links
+        self.list_path.parent.mkdir(parents=True, exist_ok=True)
+        self.list_path.write_text(format_jira_list(links), encoding="utf-8")

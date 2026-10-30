@@ -42,6 +42,10 @@ What a command hands its query to: repo shortcuts (`/g`), Jira (`/j`), the focus
 **Command menu**:
 The list of commands, each with a short description, shown while a command is being typed (`/`, `/re`) and something in it matches. Choosing one fills it in (`/g `).
 
+**Jira list**:
+The `/j` command's list of Jira links: issues and addresses opened from it, newest first, below any **pinned** ones (sprint board, backlog), which always stay on top. Each has a short title, typed after the issue (`/j 123 login fails`) or edited in its file by hand. Text searches aren't kept.
+_Avoid_: Jira history, favourites
+
 **Default project**:
 The Jira project assumed when a `/j` query is bare digits with no project specified.
 
