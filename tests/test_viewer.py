@@ -62,6 +62,8 @@ def test_page_escapes_notes_and_links_screenshots_by_day_and_position():
     assert "&lt;b&gt;standup&lt;/b&gt;" in page
     assert "<b>standup" not in page
     assert 'src="/image/2026-10-14/1"' in page
+    # Shown fitted to the window; a click opens it full size in a new tab
+    assert '<a href="/image/2026-10-14/1" target="_blank"><img src="/image/2026-10-14/1"' in page
     assert 'action="/edit/2026-10-14/1"' in page
     assert 'name="token" value="tok123"' in page
     assert 'name="days" value="60"' in page

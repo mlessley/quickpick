@@ -84,7 +84,10 @@ a.tag:hover { text-decoration: underline; }
 a.label { color: var(--label); font-weight: 600; text-decoration: none; }
 a.label:hover { text-decoration: underline; }
 a.label.continued { opacity: 0.55; font-weight: 400; }
-img { display: block; max-width: 100%; margin: 6px 0; border: 1px solid var(--rule); }
+/* Fitted to the window like a chat app shows them, so a tall image (e.g. a diagram) fits on
+   one screen; a click opens it full size */
+img { display: block; max-width: 100%; max-height: 70vh; margin: 6px 0;
+      border: 1px solid var(--rule); }
 form { margin: 0; }
 .actions { display: flex; gap: 8px; }
 h2 form button { font-size: 11px; font-weight: 400; padding: 0 6px; }
@@ -225,7 +228,8 @@ def _render_entry(
     address = entry_id(day, index)
     return (
         f'<div {anchor}>{time}<div class="body">{context}'
-        f'<img src="/image/{address}" alt="{escape(entry.text)}" loading="lazy">'
+        f'<a href="/image/{address}" target="_blank">'
+        f'<img src="/image/{address}" alt="{escape(entry.text)}" loading="lazy"></a>'
         '<div class="actions">'
         f"{_post_button(f'/edit/{address}', 'Edit in GreenShot', token, days)}"
         f"{_post_button(f'/show/{address}', 'Show in folder', token, days)}"
